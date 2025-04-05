@@ -217,13 +217,19 @@ function generateChunkData(chunkX, chunkY) {
         });
     }
 
-    const numObstacles = Math.floor(chunkNoise(100, 100) * 5 + 2); // 2-7 obstacles
+    const numObstacles = Math.floor((chunkNoise(100, 100) + 1) / 2 * 5 + 2); // Use noise mapped to [0, 1], generates 2-7 obstacles
      for (let i = 0; i < numObstacles; i++) {
+        // Map noise from [-1, 1] to [0, 1] for positioning within the chunk, adding margins
+        const normalizedNoiseX = (chunkNoise(200 + i, 200 + i) + 1) / 2;
+        const normalizedNoiseY = (chunkNoise(300 + i, 300 + i) + 1) / 2;
+        // Map noise from [-1, 1] to [0, 1] for radius calculation
+        const normalizedNoiseRadius = (chunkNoise(400 + i, 400 + i) + 1) / 2;
+
         obstacles.push({
             id: `obs_${chunkId}_${i}`,
-            x: chunkX * CHUNK_SIZE + chunkNoise(200 + i, 200 + i) * CHUNK_SIZE * 0.8 + CHUNK_SIZE * 0.1, // Use noise for placement too
-            y: chunkY * CHUNK_SIZE + chunkNoise(300 + i, 300 + i) * CHUNK_SIZE * 0.8 + CHUNK_SIZE * 0.1,
-            radius: chunkNoise(400+i, 400+i) * 20 + 15, // Radius between 15 and 35
+            x: chunkX * CHUNK_SIZE + normalizedNoiseX * CHUNK_SIZE * 0.8 + CHUNK_SIZE * 0.1, // Position within 80% of chunk, offset by 10%
+            y: chunkY * CHUNK_SIZE + normalizedNoiseY * CHUNK_SIZE * 0.8 + CHUNK_SIZE * 0.1,
+            radius: normalizedNoiseRadius * 20 + 15, // Radius between 15 (0*20+15) and 35 (1*20+15)
         });
     }
 
@@ -984,4 +990,3 @@ function gameLoop(timestamp) {
 
 // --- Start ---
 initializeGame();
-
