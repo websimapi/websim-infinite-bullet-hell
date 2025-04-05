@@ -224,8 +224,6 @@ function getVisibleChunkIds() {
 
 function generateChunkData(chunkX, chunkY) {
     const chunkId = `${chunkX}_${chunkY}`;
-    // Simple deterministic generation based on chunk coordinates using simplex noise
-    // More complex generation can be added here
     const npcs = [];
     const obstacles = [];
     const distanceFactor = Math.sqrt(chunkX * chunkX + chunkY * chunkY);
@@ -234,16 +232,45 @@ function generateChunkData(chunkX, chunkY) {
 
     // --- NPC Generation based on Distance ---
     let numNpcs = 0;
-    // Start with a very low base speed near spawn
-    let npcBaseSpeed = 0.3; // Significantly reduced base speed
-    let baseShootInterval = 15000; // Longer interval near spawn by default (15s+)
-    let shooterProbability = 0; // No shooters near spawn
-    let canShoot = false; // NPCs generally can't shoot near spawn
+    let npcBaseSpeed = 0.3;
+    let baseShootInterval = 15000;
+    let shooterProbability = 0;
+    let canShoot = false;
 
-    // Spawn Chunk (0,0) - Explicitly 0 NPCs
+    // Spawn Chunk (0,0) - Explicitly 0 NPCs and add walls/gates
     if (chunkX === 0 && chunkY === 0) {
-        numNpcs = 0;
-        console.log(`Chunk ${chunkId}: Spawn chunk, 0 NPCs.`);
+        numNpcs = 0; // Absolutely no NPCs in spawn
+        console.log(`Chunk ${chunkId}: Generating Spawn Walls.`);
+
+        // Define wall properties
+        const wallThickness = 20;
+        const halfChunk = CHUNK_SIZE / 2;
+        const gateWidth = 80; // Width of the openings
+        const halfGate = gateWidth / 2;
+
+        // Create walls as obstacles (rectangles for simplicity, using radius conceptually)
+        // We'll represent thick walls with several large-radius obstacles or just conceptual lines for now
+        // Using simple rectangular obstacles:
+        const wallColor = '#666'; // Give walls a distinct color if needed later
+
+        // Wall segment calculations to leave gates centered
+        const segmentLengthX = (CHUNK_SIZE - gateWidth) / 2;
+        const segmentLengthY = (CHUNK_SIZE - gateWidth) / 2;
+
+        // North Wall (two segments)
+        obstacles.push({ id: `obs_spawn_n1`, x: -halfChunk + segmentLengthX / 2, y: -halfChunk + wallThickness / 2, width: segmentLengthX, height: wallThickness, type: 'wall' });
+        obstacles.push({ id: `obs_spawn_n2`, x: halfChunk - segmentLengthX / 2, y: -halfChunk + wallThickness / 2, width: segmentLengthX, height: wallThickness, type: 'wall' });
+        // South Wall (two segments)
+        obstacles.push({ id: `obs_spawn_s1`, x: -halfChunk + segmentLengthX / 2, y: halfChunk - wallThickness / 2, width: segmentLengthX, height: wallThickness, type: 'wall' });
+        obstacles.push({ id: `obs_spawn_s2`, x: halfChunk - segmentLengthX / 2, y: halfChunk - wallThickness / 2, width: segmentLengthX, height: wallThickness, type: 'wall' });
+        // West Wall (two segments)
+        obstacles.push({ id: `obs_spawn_w1`, x: -halfChunk + wallThickness / 2, y: -halfChunk + segmentLengthY / 2, width: wallThickness, height: segmentLengthY, type: 'wall' });
+        obstacles.push({ id: `obs_spawn_w2`, x: -halfChunk + wallThickness / 2, y: halfChunk - segmentLengthY / 2, width: wallThickness, height: segmentLengthY, type: 'wall' });
+        // East Wall (two segments)
+        obstacles.push({ id: `obs_spawn_e1`, x: halfChunk - wallThickness / 2, y: -halfChunk + segmentLengthY / 2, width: wallThickness, height: segmentLengthY, type: 'wall' });
+        obstacles.push({ id: `obs_spawn_e2`, x: halfChunk - wallThickness / 2, y: halfChunk - segmentLengthY / 2, width: wallThickness, height: segmentLengthY, type: 'wall' });
+
+
     }
     // Immediate adjacent chunks (distanceFactor approx 1 to 1.41)
     else if (distanceFactor < 2) {
@@ -257,7 +284,7 @@ function generateChunkData(chunkX, chunkY) {
         baseShootInterval = 18000 + Math.random() * 4000; // Even rarer shots (18-22s)
         shooterProbability = 0; // Still no shooters
         canShoot = false; // Cannot shoot this close
-        console.log(`Chunk ${chunkId}: Adjacent to spawn, ${numNpcs} NPCs (slow).`);
+        console.log(`Chunk ${chunkId}: Adjacent to spawn, ${numNpcs} NPCs (slow, dodger only).`);
     }
     // Close chunks (distanceFactor 2 to < 5)
     else if (distanceFactor < 5) {
@@ -282,32 +309,36 @@ function generateChunkData(chunkX, chunkY) {
         console.log(`Chunk ${chunkId}: Farther out, ${numNpcs} NPCs (scaling).`);
     }
 
+    // Generate the NPCs *only if* not in spawn chunk
+    if (chunkX !== 0 || chunkY !== 0) {
+        for (let i = 0; i < numNpcs; i++) {
+            // Decide NPC type based on probability
+            const npcType = (shooterProbability > 0 && Math.random() < shooterProbability) ? 'shooter' : 'dodger';
+            // Adjust speed slightly based on noise, keep it within reasonable bounds
+            const speedMultiplier = Math.max(0.2, npcBaseSpeed + (chunkNoise(i*5, i*5) * 0.1)); // Ensure minimum speed
 
-    for (let i = 0; i < numNpcs; i++) {
-        // Decide NPC type based on probability
-        const npcType = Math.random() < shooterProbability ? 'shooter' : 'dodger';
-        // Adjust speed slightly based on noise, keep it within reasonable bounds
-        const speedMultiplier = Math.max(0.2, npcBaseSpeed + (chunkNoise(i*5, i*5) * 0.1)); // Ensure minimum speed
-
-        npcs.push({
-            id: `npc_${chunkId}_${i}`,
-            x: chunkX * CHUNK_SIZE + Math.random() * CHUNK_SIZE,
-            y: chunkY * CHUNK_SIZE + Math.random() * CHUNK_SIZE,
-            vx: (chunkNoise(i * 0.1, 0) * 2 - 1) * speedMultiplier,
-            vy: (chunkNoise(0, i * 0.1) * 2 - 1) * speedMultiplier,
-            type: npcType,
-            lastShotTime: 0,
-             // Use the calculated base interval, adjust slightly per type
-            shootInterval: baseShootInterval * (1 + (Math.random() * 0.4 - 0.2)) * (npcType === 'shooter' ? 0.9 : 1.1), // Add +-20% randomness + type adjustment
-            radius: 8,
-            canShoot: canShoot // Assign the determined shoot ability
-        });
+            npcs.push({
+                id: `npc_${chunkId}_${i}`,
+                x: chunkX * CHUNK_SIZE + Math.random() * CHUNK_SIZE,
+                y: chunkY * CHUNK_SIZE + Math.random() * CHUNK_SIZE,
+                vx: (chunkNoise(i * 0.1, 0) * 2 - 1) * speedMultiplier,
+                vy: (chunkNoise(0, i * 0.1) * 2 - 1) * speedMultiplier,
+                type: npcType,
+                lastShotTime: 0,
+                 // Use the calculated base interval, adjust slightly per type
+                shootInterval: baseShootInterval * (1 + (Math.random() * 0.4 - 0.2)) * (npcType === 'shooter' ? 0.9 : 1.1), // Add +-20% randomness + type adjustment
+                radius: 8,
+                canShoot: canShoot // Assign the determined shoot ability
+            });
+        }
     }
+
 
     // --- Obstacle Generation ---
      // Keep obstacle generation similar, maybe slightly fewer near spawn
     let numObstacles = 0;
-     if (distanceFactor > 1) { // No obstacles right next to spawn (0,0) or immediate neighbours
+     // Only generate random obstacles outside spawn and immediate neighbours
+     if (distanceFactor >= 2) {
          numObstacles = Math.floor((chunkNoise(100, 100) + 1) / 2 * (2 + distanceFactor * 0.4) + 1); // Fewer base obstacles, scale slightly slower
      }
 
@@ -324,6 +355,7 @@ function generateChunkData(chunkX, chunkY) {
             y: chunkY * CHUNK_SIZE + normalizedNoiseY * CHUNK_SIZE * 0.8 + CHUNK_SIZE * 0.1,
              // Slightly smaller obstacles near spawn, scale slower
             radius: normalizedNoiseRadius * 10 + 8 + Math.min(12, distanceFactor * 1.0), // Radius: base 8-18, scales slightly slower with distance up to +12
+            type: 'random' // Differentiate from walls
         });
     }
 
@@ -625,33 +657,85 @@ function updatePlayer(deltaTime) {
     const nextY = localPlayer.y + localPlayer.vy;
 
     // Basic Collision with Obstacles (from nearby chunks)
-    let collision = false;
+    let collisionX = false;
+    let collisionY = false;
+    let tempNextX = nextX;
+    let tempNextY = nextY;
+
     const nearbyChunks = getNearbyChunkIds(localPlayer.x, localPlayer.y);
     nearbyChunks.forEach(chunkId => {
         const chunk = localChunks[chunkId]; // Use definitive local data
         if (chunk && chunk.obstacles) {
             chunk.obstacles.forEach(obstacle => {
-                const dist = Math.sqrt((nextX - obstacle.x) ** 2 + (nextY - obstacle.y) ** 2);
-                if (dist < PLAYER_RADIUS + obstacle.radius) {
-                    collision = true;
-                    // Simple push-back collision response
-                    const overlap = (PLAYER_RADIUS + obstacle.radius) - dist;
-                    const angle = Math.atan2(nextY - obstacle.y, nextX - obstacle.x);
-                    localPlayer.vx = 0; // Stop movement on collision for simplicity
-                    localPlayer.vy = 0;
-                    // Move player back slightly (could be improved)
-                    // localPlayer.x -= Math.cos(angle) * overlap * 0.1;
-                    // localPlayer.y -= Math.sin(angle) * overlap * 0.1;
+                if (obstacle.type === 'wall') {
+                    // AABB collision for rectangular walls
+                    const playerLeft = tempNextX - PLAYER_RADIUS;
+                    const playerRight = tempNextX + PLAYER_RADIUS;
+                    const playerTop = tempNextY - PLAYER_RADIUS;
+                    const playerBottom = tempNextY + PLAYER_RADIUS;
+
+                    const wallLeft = obstacle.x - obstacle.width / 2;
+                    const wallRight = obstacle.x + obstacle.width / 2;
+                    const wallTop = obstacle.y - obstacle.height / 2;
+                    const wallBottom = obstacle.y + obstacle.height / 2;
+
+                    if (playerRight > wallLeft && playerLeft < wallRight && playerBottom > wallTop && playerTop < wallBottom) {
+                         // Collision detected - prevent movement into the wall
+                         // Find overlap and push back - Simplistic push back for now
+                         const overlapX = Math.min(playerRight - wallLeft, wallRight - playerLeft);
+                         const overlapY = Math.min(playerBottom - wallTop, wallBottom - playerTop);
+
+                         // Push back on the axis with the *least* overlap
+                         if (overlapX < overlapY) {
+                             if (localPlayer.x < obstacle.x) tempNextX = wallLeft - PLAYER_RADIUS; // Hit from left
+                             else tempNextX = wallRight + PLAYER_RADIUS; // Hit from right
+                             collisionX = true;
+                         } else {
+                             if (localPlayer.y < obstacle.y) tempNextY = wallTop - PLAYER_RADIUS; // Hit from top
+                             else tempNextY = wallBottom + PLAYER_RADIUS; // Hit from bottom
+                             collisionY = true;
+                         }
+                    }
+                } else if (obstacle.type === 'random' || obstacle.radius) {
+                    // Circle collision for random obstacles
+                    const dist = Math.sqrt((tempNextX - obstacle.x) ** 2 + (tempNextY - obstacle.y) ** 2);
+                    const minRadius = PLAYER_RADIUS + (obstacle.radius || 0); // Use obstacle radius if available
+                    if (dist < minRadius) {
+                        // collision = true; // Use specific axis collision flags
+                        // Simple push-back collision response - More robust needed
+                        const overlap = minRadius - dist;
+                        const angle = Math.atan2(tempNextY - obstacle.y, tempNextX - obstacle.x);
+
+                        // Push back slightly based on collision angle
+                        // This simple approach might stick, better physics needed for smooth slide
+                        tempNextX += Math.cos(angle) * overlap * 0.5;
+                        tempNextY += Math.sin(angle) * overlap * 0.5;
+
+                        // More simply, just stop movement towards the obstacle
+                         // Determine if collision primarily horizontal or vertical
+                         if (Math.abs(localPlayer.vx) > Math.abs(localPlayer.vy)) {
+                             collisionX = true; // Prioritize stopping X if moving more horizontally
+                         } else {
+                             collisionY = true; // Prioritize stopping Y if moving more vertically
+                         }
+                    }
                 }
             });
         }
     });
 
 
-     if (!collision) {
-        localPlayer.x = nextX;
-        localPlayer.y = nextY;
-    }
+     // Apply movement restrictions based on collisions
+     if (!collisionX) {
+        localPlayer.x = tempNextX; // Allow X movement if no X collision
+     } else {
+         localPlayer.vx = 0; // Stop horizontal velocity on X collision
+     }
+      if (!collisionY) {
+         localPlayer.y = tempNextY; // Allow Y movement if no Y collision
+     } else {
+         localPlayer.vy = 0; // Stop vertical velocity on Y collision
+     }
 
 
     // Update score based on time survived
@@ -933,36 +1017,40 @@ function draw() {
         if (chunk) {
              // Draw obstacles
              if(chunk.obstacles) {
-                ctx.fillStyle = '#555';
                 chunk.obstacles.forEach(obstacle => {
-                    ctx.beginPath();
-                    // Ensure radius is positive before drawing
-                    const radius = obstacle.radius || 15; // Default if missing
-                    if (radius > 0) {
-                        ctx.arc(obstacle.x, obstacle.y, radius, 0, Math.PI * 2);
-                        ctx.fill();
-                    } else {
-                         console.warn("Skipping drawing obstacle with invalid radius:", obstacle);
-                         ctx.fillStyle = 'magenta';
-                         ctx.fillRect(obstacle.x - 5, obstacle.y - 5, 10, 10); // Error marker
+                    if (obstacle.type === 'wall') {
+                        ctx.fillStyle = '#666'; // Wall color
+                        ctx.fillRect(obstacle.x - obstacle.width / 2, obstacle.y - obstacle.height / 2, obstacle.width, obstacle.height);
+                    } else if (obstacle.radius) { // Assume circular if radius exists
+                        ctx.fillStyle = '#555'; // Random obstacle color
+                        ctx.beginPath();
+                        const radius = obstacle.radius || 15;
+                        if (radius > 0) {
+                            ctx.arc(obstacle.x, obstacle.y, radius, 0, Math.PI * 2);
+                            ctx.fill();
+                        } else {
+                             console.warn("Skipping drawing obstacle with invalid radius:", obstacle);
+                             ctx.fillStyle = 'magenta';
+                             ctx.fillRect(obstacle.x - 5, obstacle.y - 5, 10, 10); // Error marker
+                        }
                     }
                 });
             }
 
-             // Draw NPCs
-            if(chunk.npcs) {
+             // Draw NPCs (only if not spawn chunk, handled by generation)
+            if(chunk.npcs && chunk.npcs.length > 0) {
                 chunk.npcs.forEach(npc => {
                     ctx.fillStyle = npc.type === 'shooter' ? '#f55' : '#f90'; // Red for shooters, orange for dodgers
                     ctx.beginPath();
                     // Ensure radius is positive before drawing
-                    const radius = npc.radius || 8; // Default if missing/falsy
-                    if (radius > 0) {
+                     const radius = npc.radius || 8; // Default if missing/falsy
+                     if (radius > 0) {
                         ctx.arc(npc.x, npc.y, radius, 0, Math.PI * 2);
                         ctx.fill();
                     } else {
-                         console.warn("Skipping drawing NPC with invalid radius:", npc);
-                         ctx.fillStyle = 'magenta';
-                         ctx.fillRect(npc.x - 5, npc.y - 5, 10, 10); // Error marker
+                        console.warn("Skipping drawing NPC with invalid radius:", npc);
+                        ctx.fillStyle = 'magenta';
+                        ctx.fillRect(npc.x - 5, npc.y - 5, 10, 10); // Error marker
                     }
                 });
             }
