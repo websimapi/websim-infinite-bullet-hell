@@ -21,14 +21,16 @@ const BULLET_DAMAGE = 15; // Base damage per bullet hit
 const DODGER_BULLET_DAMAGE = 10; // Damage for dodger bullets
 const EXPLOSION_DURATION = 0.3; // seconds
 const EXPLOSION_RADIUS = 30; // Max radius of explosion effect
-const SPAWN_WALL_THICKNESS = 20; // Thickness for collision walls
-const SPAWN_GATE_WIDTH = 80; // Width of the openings for collision
-const SPAWN_VISUAL_WALL_THICKNESS = 30; // Thickness for visual walls
-const SPAWN_VISUAL_GATE_WIDTH = 90; // Visual opening width
+// Define Spawn Wall Collision dimensions centered around 0,0
+const SPAWN_WALL_COLLISION_THICKNESS = 20; // Thickness for collision physics
+const SPAWN_GATE_COLLISION_WIDTH = 80; // Width of the physical openings for collision
+// Define Spawn Wall Visual dimensions (can be slightly different for appearance)
+const SPAWN_WALL_VISUAL_THICKNESS = 30; // Thickness for drawing
+const SPAWN_GATE_VISUAL_WIDTH = 90; // Visual opening width
 
 let localPlayer = {
-  x: 0,
-  y: 0,
+  x: 1, // Start slightly offset from absolute 0,0 to avoid initial edge collisions
+  y: 1,
   vx: 0,
   vy: 0,
   score: 0,
@@ -59,17 +61,21 @@ async function initializeGame() {
 
   await room.initialize();
 
-  // Initialize player presence
-  localPlayer.x = room.roomState.spawnX || 0;
-  localPlayer.y = room.roomState.spawnY || 0;
-  room.updatePresence({
-    x: localPlayer.x,
-    y: localPlayer.y,
-    score: localPlayer.score,
-    health: localPlayer.health,
-    maxHealth: localPlayer.maxHealth,
-    dead: localPlayer.dead,
-  });
+  // Initialize player presence - start position is handled by default localPlayer state
+  // If room state has a different spawn, it could override, but default is now (1, 1)
+  const initialState = {
+      x: room.roomState.spawnX ?? localPlayer.x,
+      y: room.roomState.spawnY ?? localPlayer.y,
+      score: localPlayer.score,
+      health: localPlayer.health,
+      maxHealth: localPlayer.maxHealth,
+      dead: localPlayer.dead,
+  };
+  localPlayer.x = initialState.x;
+  localPlayer.y = initialState.y;
+
+  room.updatePresence(initialState);
+
 
   // Load chunks from localStorage
   loadChunksFromLocalStorage();
@@ -244,32 +250,33 @@ function generateChunkData(chunkX, chunkY) {
         numNpcs = 0; // Absolutely no NPCs in spawn
         console.log(`Chunk ${chunkId}: Generating Spawn Walls for collision.`);
 
-        // Define collision wall properties
-        const wallThickness = SPAWN_WALL_THICKNESS;
+        // Define collision wall properties using constants
+        const wallThickness = SPAWN_WALL_COLLISION_THICKNESS;
         const halfChunk = CHUNK_SIZE / 2;
-        const gateWidth = SPAWN_GATE_WIDTH;
+        const gateWidth = SPAWN_GATE_COLLISION_WIDTH;
         const halfGate = gateWidth / 2;
 
         // Collision Wall segment calculations to leave gates centered
+        // Segment length is the solid part of the wall on one side of the gate
         const segmentLengthX = (CHUNK_SIZE - gateWidth) / 2;
         const segmentLengthY = (CHUNK_SIZE - gateWidth) / 2;
 
         // --- Collision Obstacles (these are invisible, just for physics) ---
-        // These define the SOLID parts of the wall for collision checks.
-        // They are positioned slightly inside the visual boundary.
+        // Define the SOLID parts of the wall for collision checks.
+        // Coordinates are relative to chunk center (0,0 for the spawn chunk)
 
-        // North Wall (visual)
-        obstacles.push({ id: `obs_spawn_n1`, x: -halfChunk + segmentLengthX / 2, y: -halfChunk + wallThickness / 2, width: segmentLengthX, height: wallThickness, type: 'wall' });
-        obstacles.push({ id: `obs_spawn_n2`, x: halfChunk - segmentLengthX / 2, y: -halfChunk + wallThickness / 2, width: segmentLengthX, height: wallThickness, type: 'wall' });
-        // South Wall (visual)
-        obstacles.push({ id: `obs_spawn_s1`, x: -halfChunk + segmentLengthX / 2, y: halfChunk - wallThickness / 2, width: segmentLengthX, height: wallThickness, type: 'wall' });
-        obstacles.push({ id: `obs_spawn_s2`, x: halfChunk - segmentLengthX / 2, y: halfChunk - wallThickness / 2, width: segmentLengthX, height: wallThickness, type: 'wall' });
-        // West Wall (visual)
-        obstacles.push({ id: `obs_spawn_w1`, x: -halfChunk + wallThickness / 2, y: -halfChunk + segmentLengthY / 2, width: wallThickness, height: segmentLengthY, type: 'wall' });
-        obstacles.push({ id: `obs_spawn_w2`, x: -halfChunk + wallThickness / 2, y: halfChunk - segmentLengthY / 2, width: wallThickness, height: segmentLengthY, type: 'wall' });
-        // East Wall (visual)
-        obstacles.push({ id: `obs_spawn_e1`, x: halfChunk - wallThickness / 2, y: -halfChunk + segmentLengthY / 2, width: wallThickness, height: segmentLengthY, type: 'wall' });
-        obstacles.push({ id: `obs_spawn_e2`, x: halfChunk - wallThickness / 2, y: halfChunk - segmentLengthY / 2, width: wallThickness, height: segmentLengthY, type: 'wall' });
+        // North Wall segments (Top edge: y = -halfChunk)
+        obstacles.push({ id: `obs_spawn_n1`, x: -halfChunk + segmentLengthX / 2, y: -halfChunk + wallThickness / 2, width: segmentLengthX, height: wallThickness, type: 'wall' }); // Left part
+        obstacles.push({ id: `obs_spawn_n2`, x: halfChunk - segmentLengthX / 2, y: -halfChunk + wallThickness / 2, width: segmentLengthX, height: wallThickness, type: 'wall' }); // Right part
+        // South Wall segments (Bottom edge: y = +halfChunk)
+        obstacles.push({ id: `obs_spawn_s1`, x: -halfChunk + segmentLengthX / 2, y: halfChunk - wallThickness / 2, width: segmentLengthX, height: wallThickness, type: 'wall' }); // Left part
+        obstacles.push({ id: `obs_spawn_s2`, x: halfChunk - segmentLengthX / 2, y: halfChunk - wallThickness / 2, width: segmentLengthX, height: wallThickness, type: 'wall' }); // Right part
+        // West Wall segments (Left edge: x = -halfChunk)
+        obstacles.push({ id: `obs_spawn_w1`, x: -halfChunk + wallThickness / 2, y: -halfChunk + segmentLengthY / 2, width: wallThickness, height: segmentLengthY, type: 'wall' }); // Top part
+        obstacles.push({ id: `obs_spawn_w2`, x: -halfChunk + wallThickness / 2, y: halfChunk - segmentLengthY / 2, width: wallThickness, height: segmentLengthY, type: 'wall' }); // Bottom part
+        // East Wall segments (Right edge: x = +halfChunk)
+        obstacles.push({ id: `obs_spawn_e1`, x: halfChunk - wallThickness / 2, y: -halfChunk + segmentLengthY / 2, width: wallThickness, height: segmentLengthY, type: 'wall' }); // Top part
+        obstacles.push({ id: `obs_spawn_e2`, x: halfChunk - wallThickness / 2, y: halfChunk - segmentLengthY / 2, width: wallThickness, height: segmentLengthY, type: 'wall' }); // Bottom part
 
     }
     // Immediate adjacent chunks (distanceFactor approx 1 to 1.41)
@@ -350,6 +357,7 @@ function generateChunkData(chunkX, chunkY) {
 
         obstacles.push({
             id: `obs_${chunkId}_${i}`,
+            // Position relative to world origin (0,0)
             x: chunkX * CHUNK_SIZE + normalizedNoiseX * CHUNK_SIZE * 0.8 + CHUNK_SIZE * 0.1, // Position within 80% of chunk, offset by 10%
             y: chunkY * CHUNK_SIZE + normalizedNoiseY * CHUNK_SIZE * 0.8 + CHUNK_SIZE * 0.1,
              // Slightly smaller obstacles near spawn, scale slower
@@ -636,25 +644,36 @@ function updatePlayer(deltaTime) {
     if (keys['d'] || keys['arrowright']) moveX += 1;
 
     const magnitude = Math.sqrt(moveX * moveX + moveY * moveY);
+    let targetVx = 0;
+    let targetVy = 0;
     if (magnitude > 0) {
-        localPlayer.vx = (moveX / magnitude) * MAX_SPEED;
-        localPlayer.vy = (moveY / magnitude) * MAX_SPEED;
-    } else {
-        // Simple deceleration
-        localPlayer.vx *= 0.9;
-        localPlayer.vy *= 0.9;
-        if (Math.abs(localPlayer.vx) < 0.1) localPlayer.vx = 0;
-        if (Math.abs(localPlayer.vy) < 0.1) localPlayer.vy = 0;
+        targetVx = (moveX / magnitude) * MAX_SPEED;
+        targetVy = (moveY / magnitude) * MAX_SPEED;
     }
 
-    const nextX = localPlayer.x + localPlayer.vx;
-    const nextY = localPlayer.y + localPlayer.vy;
+     // Apply acceleration/deceleration (simple lerp towards target velocity)
+     const acceleration = 0.2; // Adjust for responsiveness
+     localPlayer.vx += (targetVx - localPlayer.vx) * acceleration;
+     localPlayer.vy += (targetVy - localPlayer.vy) * acceleration;
 
-    // Basic Collision with Obstacles (from nearby chunks)
-    let collisionX = false;
-    let collisionY = false;
-    let tempNextX = nextX;
-    let tempNextY = nextY;
+    // Dampen velocity if no input
+    if (magnitude === 0) {
+        localPlayer.vx *= 0.9;
+        localPlayer.vy *= 0.9;
+    }
+
+    // Clamp velocity near zero to stop movement
+    if (Math.abs(localPlayer.vx) < 0.1) localPlayer.vx = 0;
+    if (Math.abs(localPlayer.vy) < 0.1) localPlayer.vy = 0;
+
+
+    let nextX = localPlayer.x + localPlayer.vx;
+    let nextY = localPlayer.y + localPlayer.vy;
+
+    // Collision Detection and Resolution
+    let collisionDetected = false;
+    let proposedX = nextX;
+    let proposedY = nextY;
 
     const nearbyChunks = getNearbyChunkIds(localPlayer.x, localPlayer.y);
     nearbyChunks.forEach(chunkId => {
@@ -663,72 +682,76 @@ function updatePlayer(deltaTime) {
             chunk.obstacles.forEach(obstacle => {
                 if (obstacle.type === 'wall') {
                     // AABB collision for rectangular walls
-                    const playerLeft = tempNextX - PLAYER_RADIUS;
-                    const playerRight = tempNextX + PLAYER_RADIUS;
-                    const playerTop = tempNextY - PLAYER_RADIUS;
-                    const playerBottom = tempNextY + PLAYER_RADIUS;
+                    const playerLeft = proposedX - PLAYER_RADIUS;
+                    const playerRight = proposedX + PLAYER_RADIUS;
+                    const playerTop = proposedY - PLAYER_RADIUS;
+                    const playerBottom = proposedY + PLAYER_RADIUS;
 
                     const wallLeft = obstacle.x - obstacle.width / 2;
                     const wallRight = obstacle.x + obstacle.width / 2;
                     const wallTop = obstacle.y - obstacle.height / 2;
                     const wallBottom = obstacle.y + obstacle.height / 2;
 
+                    // Check for overlap
                     if (playerRight > wallLeft && playerLeft < wallRight && playerBottom > wallTop && playerTop < wallBottom) {
-                         // Collision detected - prevent movement into the wall
-                         // Find overlap and push back - Simplistic push back for now
-                         const overlapX = Math.min(playerRight - wallLeft, wallRight - playerLeft);
-                         const overlapY = Math.min(playerBottom - wallTop, wallBottom - playerTop);
+                        collisionDetected = true;
 
-                         // Push back on the axis with the *least* overlap
-                         if (overlapX < overlapY) {
-                             if (localPlayer.x < obstacle.x) tempNextX = wallLeft - PLAYER_RADIUS; // Hit from left
-                             else tempNextX = wallRight + PLAYER_RADIUS; // Hit from right
-                             collisionX = true;
-                         } else {
-                             if (localPlayer.y < obstacle.y) tempNextY = wallTop - PLAYER_RADIUS; // Hit from top
-                             else tempNextY = wallBottom + PLAYER_RADIUS; // Hit from bottom
-                             collisionY = true;
-                         }
+                        // --- Simple Push-out Resolution ---
+                        // Calculate overlaps
+                        const overlapX = Math.min(playerRight - wallLeft, wallRight - playerLeft);
+                        const overlapY = Math.min(playerBottom - wallTop, wallBottom - playerTop);
+
+                        // Push out on the axis of minimum overlap
+                        if (overlapX < overlapY) {
+                            if (localPlayer.x < obstacle.x) { // Player is to the left of the wall center
+                                proposedX = wallLeft - PLAYER_RADIUS - 0.01; // Push left
+                            } else { // Player is to the right
+                                proposedX = wallRight + PLAYER_RADIUS + 0.01; // Push right
+                            }
+                            localPlayer.vx = 0; // Stop horizontal velocity
+                        } else {
+                            if (localPlayer.y < obstacle.y) { // Player is above the wall center
+                                proposedY = wallTop - PLAYER_RADIUS - 0.01; // Push up
+                            } else { // Player is below
+                                proposedY = wallBottom + PLAYER_RADIUS + 0.01; // Push down
+                            }
+                             localPlayer.vy = 0; // Stop vertical velocity
+                        }
                     }
                 } else if (obstacle.type === 'random' || obstacle.radius) {
                     // Circle collision for random obstacles
-                    const dist = Math.sqrt((tempNextX - obstacle.x) ** 2 + (tempNextY - obstacle.y) ** 2);
-                    const minRadius = PLAYER_RADIUS + (obstacle.radius || 0); // Use obstacle radius if available
-                    if (dist < minRadius) {
-                        // collision = true; // Use specific axis collision flags
-                        // Simple push-back collision response - More robust needed
-                        const overlap = minRadius - dist;
-                        const angle = Math.atan2(tempNextY - obstacle.y, tempNextX - obstacle.x);
+                    const dx = proposedX - obstacle.x;
+                    const dy = proposedY - obstacle.y;
+                    const distSq = dx * dx + dy * dy;
+                    const minRadius = PLAYER_RADIUS + (obstacle.radius || 0);
+                    const minRadiusSq = minRadius * minRadius;
 
-                        // Push back slightly based on collision angle
-                        // This simple approach might stick, better physics needed for smooth slide
-                        tempNextX += Math.cos(angle) * overlap * 0.5;
-                        tempNextY += Math.sin(angle) * overlap * 0.5;
+                    if (distSq < minRadiusSq) {
+                         collisionDetected = true;
+                         const dist = Math.sqrt(distSq);
+                         const overlap = minRadius - dist;
+                         const angle = Math.atan2(dy, dx);
 
-                        // More simply, just stop movement towards the obstacle
-                         // Determine if collision primarily horizontal or vertical
-                         if (Math.abs(localPlayer.vx) > Math.abs(localPlayer.vy)) {
-                             collisionX = true; // Prioritize stopping X if moving more horizontally
-                         } else {
-                             collisionY = true; // Prioritize stopping Y if moving more vertically
-                         }
+                         // Push out along the collision normal
+                         proposedX += Math.cos(angle) * overlap;
+                         proposedY += Math.sin(angle) * overlap;
+
+                         // Simple velocity reflection (dampened)
+                         const normalX = dx / dist;
+                         const normalY = dy / dist;
+                         const dotProduct = localPlayer.vx * normalX + localPlayer.vy * normalY;
+                         localPlayer.vx -= 1.5 * dotProduct * normalX; // Adjust reflection factor (e.g., 1.5)
+                         localPlayer.vy -= 1.5 * dotProduct * normalY;
                     }
                 }
             });
         }
     });
 
-     // Apply movement restrictions based on collisions
-     if (!collisionX) {
-        localPlayer.x = tempNextX; // Allow X movement if no X collision
-     } else {
-         localPlayer.vx = 0; // Stop horizontal velocity on X collision
-     }
-      if (!collisionY) {
-         localPlayer.y = tempNextY; // Allow Y movement if no Y collision
-     } else {
-         localPlayer.vy = 0; // Stop vertical velocity on Y collision
-     }
+    // Update player position
+    localPlayer.x = proposedX;
+    localPlayer.y = proposedY;
+
 
     // Update score based on time survived
     const now = Date.now();
@@ -904,15 +927,39 @@ function updateBullets(deltaTime) {
          const chunk = localChunks[bulletChunkId]; // Use definitive local data
          if(chunk && chunk.obstacles) {
              for(const obstacle of chunk.obstacles) {
-                 const dist = Math.sqrt((bullet.x - obstacle.x) ** 2 + (bullet.y - obstacle.y) ** 2);
-                 if (dist < bullet.radius + obstacle.radius) {
-                     // Trigger explosion for dodger bullets on obstacle hit
-                     if (bullet.type === 'dodger') {
-                         createExplosion(bullet.x, bullet.y);
-                          // Send explosion event to others
-                         room.send({ type: 'explosion', x: bullet.x, y: bullet.y });
+                 if (obstacle.type === 'wall') {
+                     // AABB check for bullet vs wall
+                     const bulletLeft = bullet.x - bullet.radius;
+                     const bulletRight = bullet.x + bullet.radius;
+                     const bulletTop = bullet.y - bullet.radius;
+                     const bulletBottom = bullet.y + bullet.radius;
+
+                     const wallLeft = obstacle.x - obstacle.width / 2;
+                     const wallRight = obstacle.x + obstacle.width / 2;
+                     const wallTop = obstacle.y - obstacle.height / 2;
+                     const wallBottom = obstacle.y + obstacle.height / 2;
+
+                     if (bulletRight > wallLeft && bulletLeft < wallRight && bulletBottom > wallTop && bulletTop < wallBottom) {
+                         // Wall collision
+                         if (bullet.type === 'dodger') {
+                             createExplosion(bullet.x, bullet.y);
+                             room.send({ type: 'explosion', x: bullet.x, y: bullet.y });
+                         }
+                         return false; // Remove bullet
                      }
-                     return false; // Remove bullet on obstacle collision
+                 } else if (obstacle.type === 'random' || obstacle.radius) {
+                     // Circle check for bullet vs random obstacle
+                    const dist = Math.sqrt((bullet.x - obstacle.x) ** 2 + (bullet.y - obstacle.y) ** 2);
+                    const collisionRadius = bullet.radius + (obstacle.radius || 0);
+                    if (dist < collisionRadius) {
+                        // Trigger explosion for dodger bullets on obstacle hit
+                        if (bullet.type === 'dodger') {
+                            createExplosion(bullet.x, bullet.y);
+                             // Send explosion event to others
+                            room.send({ type: 'explosion', x: bullet.x, y: bullet.y });
+                        }
+                        return false; // Remove bullet on obstacle collision
+                    }
                  }
              }
          }
@@ -1190,8 +1237,8 @@ function draw() {
 
 function drawSpawnChunkVisuals(chunkBaseX, chunkBaseY) {
     const halfChunk = CHUNK_SIZE / 2;
-    const wallThickness = SPAWN_VISUAL_WALL_THICKNESS; // Use visual thickness
-    const gateWidth = SPAWN_VISUAL_GATE_WIDTH; // Use visual gate width
+    const wallThickness = SPAWN_WALL_VISUAL_THICKNESS; // Use visual thickness
+    const gateWidth = SPAWN_GATE_VISUAL_WIDTH; // Use visual gate width
     const wallColor = '#4a4a5a'; // A slightly bluish dark grey for walls
     const gateColor = '#6a6a7a'; // Lighter color for gate area indication
 
@@ -1199,38 +1246,41 @@ function drawSpawnChunkVisuals(chunkBaseX, chunkBaseY) {
     ctx.fillRect(chunkBaseX, chunkBaseY, CHUNK_SIZE, CHUNK_SIZE);
 
     ctx.save();
-    ctx.translate(chunkBaseX + halfChunk, chunkBaseY + halfChunk); // Center drawing coords in chunk
+    // IMPORTANT: Translate to the CENTER of the chunk for drawing relative positions
+    // Since spawn chunk (0,0) coords are relative to world 0,0, the base is (0,0)
+    // So translate to the world coords of the chunk center
+    ctx.translate(chunkBaseX + halfChunk, chunkBaseY + halfChunk);
 
     // --- Draw Walls ---
     ctx.fillStyle = wallColor;
-    const outerBoundary = halfChunk; // Edge of the chunk
-    const innerBoundary = halfChunk - wallThickness; // Inner edge of the wall
+    const outerBoundary = halfChunk; // Edge of the chunk relative to center
+    const innerBoundary = halfChunk - wallThickness; // Inner edge of the wall relative to center
 
     // Calculate visual segments
     const segmentLength = (CHUNK_SIZE - gateWidth) / 2;
 
-    // North Wall (visual)
+    // North Wall (visual) - Top edge at y = -halfChunk
     ctx.fillRect(-halfChunk, -outerBoundary, segmentLength, wallThickness); // Left segment
-    ctx.fillRect(halfChunk - segmentLength, -outerBoundary, segmentLength, wallThickness); // Right segment
-    // South Wall (visual)
+    ctx.fillRect(gateWidth / 2, -outerBoundary, segmentLength, wallThickness); // Right segment (starts after the gate)
+    // South Wall (visual) - Bottom edge at y = +halfChunk (so draw UP from there)
     ctx.fillRect(-halfChunk, innerBoundary, segmentLength, wallThickness); // Left segment
-    ctx.fillRect(halfChunk - segmentLength, innerBoundary, segmentLength, wallThickness); // Right segment
-    // West Wall (visual)
+    ctx.fillRect(gateWidth / 2, innerBoundary, segmentLength, wallThickness); // Right segment
+    // West Wall (visual) - Left edge at x = -halfChunk
     ctx.fillRect(-outerBoundary, -halfChunk, wallThickness, segmentLength); // Top segment
-    ctx.fillRect(-outerBoundary, halfChunk - segmentLength, wallThickness, segmentLength); // Bottom segment
-    // East Wall (visual)
+    ctx.fillRect(-outerBoundary, gateWidth / 2, wallThickness, segmentLength); // Bottom segment (starts after the gate)
+    // East Wall (visual) - Right edge at x = +halfChunk (so draw LEFT from there)
     ctx.fillRect(innerBoundary, -halfChunk, wallThickness, segmentLength); // Top segment
-    ctx.fillRect(innerBoundary, halfChunk - segmentLength, wallThickness, segmentLength); // Bottom segment
+    ctx.fillRect(innerBoundary, gateWidth / 2, wallThickness, segmentLength); // Bottom segment
 
     // --- Draw Gate Areas (optional visual indication) ---
     ctx.fillStyle = gateColor;
-    // North Gate Area
+    // North Gate Area (Centered horizontally)
     ctx.fillRect(-gateWidth / 2, -outerBoundary, gateWidth, wallThickness);
-    // South Gate Area
+    // South Gate Area (Centered horizontally)
     ctx.fillRect(-gateWidth / 2, innerBoundary, gateWidth, wallThickness);
-    // West Gate Area
+    // West Gate Area (Centered vertically)
     ctx.fillRect(-outerBoundary, -gateWidth / 2, wallThickness, gateWidth);
-    // East Gate Area
+    // East Gate Area (Centered vertically)
     ctx.fillRect(innerBoundary, -gateWidth / 2, wallThickness, gateWidth);
 
     ctx.restore(); // Restore translation
