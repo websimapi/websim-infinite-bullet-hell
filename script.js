@@ -21,6 +21,10 @@ const BULLET_DAMAGE = 15; // Base damage per bullet hit
 const DODGER_BULLET_DAMAGE = 10; // Damage for dodger bullets
 const EXPLOSION_DURATION = 0.3; // seconds
 const EXPLOSION_RADIUS = 30; // Max radius of explosion effect
+const SPAWN_WALL_THICKNESS = 20; // Thickness for collision walls
+const SPAWN_GATE_WIDTH = 80; // Width of the openings for collision
+const SPAWN_VISUAL_WALL_THICKNESS = 30; // Thickness for visual walls
+const SPAWN_VISUAL_GATE_WIDTH = 90; // Visual opening width
 
 let localPlayer = {
   x: 0,
@@ -149,7 +153,6 @@ function handlePresenceUpdateRequest(updateRequest, fromClientId) {
     // }
 }
 
-
 function handleRoomMessages(event) {
     const data = event.data;
     switch (data.type) {
@@ -184,7 +187,6 @@ function handleRoomMessages(event) {
            break; // Avoid logging every presence update message etc.
     }
 }
-
 
 // --- Chunk Management ---
 
@@ -237,39 +239,37 @@ function generateChunkData(chunkX, chunkY) {
     let shooterProbability = 0;
     let canShoot = false;
 
-    // Spawn Chunk (0,0) - Explicitly 0 NPCs and add walls/gates
+    // Spawn Chunk (0,0) - Explicitly 0 NPCs and add walls/gates for collision
     if (chunkX === 0 && chunkY === 0) {
         numNpcs = 0; // Absolutely no NPCs in spawn
-        console.log(`Chunk ${chunkId}: Generating Spawn Walls.`);
+        console.log(`Chunk ${chunkId}: Generating Spawn Walls for collision.`);
 
-        // Define wall properties
-        const wallThickness = 20;
+        // Define collision wall properties
+        const wallThickness = SPAWN_WALL_THICKNESS;
         const halfChunk = CHUNK_SIZE / 2;
-        const gateWidth = 80; // Width of the openings
+        const gateWidth = SPAWN_GATE_WIDTH;
         const halfGate = gateWidth / 2;
 
-        // Create walls as obstacles (rectangles for simplicity, using radius conceptually)
-        // We'll represent thick walls with several large-radius obstacles or just conceptual lines for now
-        // Using simple rectangular obstacles:
-        const wallColor = '#666'; // Give walls a distinct color if needed later
-
-        // Wall segment calculations to leave gates centered
+        // Collision Wall segment calculations to leave gates centered
         const segmentLengthX = (CHUNK_SIZE - gateWidth) / 2;
         const segmentLengthY = (CHUNK_SIZE - gateWidth) / 2;
 
-        // North Wall (two segments)
+        // --- Collision Obstacles (these are invisible, just for physics) ---
+        // These define the SOLID parts of the wall for collision checks.
+        // They are positioned slightly inside the visual boundary.
+
+        // North Wall (visual)
         obstacles.push({ id: `obs_spawn_n1`, x: -halfChunk + segmentLengthX / 2, y: -halfChunk + wallThickness / 2, width: segmentLengthX, height: wallThickness, type: 'wall' });
         obstacles.push({ id: `obs_spawn_n2`, x: halfChunk - segmentLengthX / 2, y: -halfChunk + wallThickness / 2, width: segmentLengthX, height: wallThickness, type: 'wall' });
-        // South Wall (two segments)
+        // South Wall (visual)
         obstacles.push({ id: `obs_spawn_s1`, x: -halfChunk + segmentLengthX / 2, y: halfChunk - wallThickness / 2, width: segmentLengthX, height: wallThickness, type: 'wall' });
         obstacles.push({ id: `obs_spawn_s2`, x: halfChunk - segmentLengthX / 2, y: halfChunk - wallThickness / 2, width: segmentLengthX, height: wallThickness, type: 'wall' });
-        // West Wall (two segments)
+        // West Wall (visual)
         obstacles.push({ id: `obs_spawn_w1`, x: -halfChunk + wallThickness / 2, y: -halfChunk + segmentLengthY / 2, width: wallThickness, height: segmentLengthY, type: 'wall' });
         obstacles.push({ id: `obs_spawn_w2`, x: -halfChunk + wallThickness / 2, y: halfChunk - segmentLengthY / 2, width: wallThickness, height: segmentLengthY, type: 'wall' });
-        // East Wall (two segments)
+        // East Wall (visual)
         obstacles.push({ id: `obs_spawn_e1`, x: halfChunk - wallThickness / 2, y: -halfChunk + segmentLengthY / 2, width: wallThickness, height: segmentLengthY, type: 'wall' });
         obstacles.push({ id: `obs_spawn_e2`, x: halfChunk - wallThickness / 2, y: halfChunk - segmentLengthY / 2, width: wallThickness, height: segmentLengthY, type: 'wall' });
-
 
     }
     // Immediate adjacent chunks (distanceFactor approx 1 to 1.41)
@@ -333,7 +333,6 @@ function generateChunkData(chunkX, chunkY) {
         }
     }
 
-
     // --- Obstacle Generation ---
      // Keep obstacle generation similar, maybe slightly fewer near spawn
     let numObstacles = 0;
@@ -359,8 +358,7 @@ function generateChunkData(chunkX, chunkY) {
         });
     }
 
-
-    return { npcs, obstacles };
+    return { npcs, obstacles, isSpawnChunk: chunkX === 0 && chunkY === 0 }; // Add flag for easy identification
 }
 
 function ensureChunkExists(chunkId) {
@@ -373,7 +371,6 @@ function ensureChunkExists(chunkId) {
   }
   return localChunks[chunkId];
 }
-
 
 function loadChunksFromLocalStorage() {
   const storedChunks = localStorage.getItem('infiniteBulletHellChunks');
@@ -544,7 +541,6 @@ function proposeResolution(chunkId) {
     }
 }
 
-
 function resolveChunkConflict(chunkId, winnerClientId) {
     console.log(`Resolving conflict for chunk ${chunkId}, winner: ${winnerClientId}`);
 
@@ -579,7 +575,6 @@ function resolveChunkConflict(chunkId, winnerClientId) {
 
     console.log(`Conflict for chunk ${chunkId} resolved. Using data from ${winnerClientId}.`);
 }
-
 
 function cleanUpDisconnectedPeerChunks(disconnectedClientId) {
     // Remove the disconnected peer's data from remoteChunks
@@ -619,7 +614,6 @@ function cleanUpDisconnectedPeerChunks(disconnectedClientId) {
      delete players[disconnectedClientId];
      updateLeaderboard();
 }
-
 
 // --- Game Logic ---
 
@@ -724,7 +718,6 @@ function updatePlayer(deltaTime) {
         }
     });
 
-
      // Apply movement restrictions based on collisions
      if (!collisionX) {
         localPlayer.x = tempNextX; // Allow X movement if no X collision
@@ -736,7 +729,6 @@ function updatePlayer(deltaTime) {
      } else {
          localPlayer.vy = 0; // Stop vertical velocity on Y collision
      }
-
 
     // Update score based on time survived
     const now = Date.now();
@@ -755,7 +747,6 @@ function updatePlayer(deltaTime) {
         healthBarFill.style.backgroundColor = '#4caf50'; // Green
     }
     healthText.textContent = `Health: ${Math.round(localPlayer.health)}/${localPlayer.maxHealth}`;
-
 
     // Send presence update periodically
     if (now - localPlayer.lastUpdateTime > 50) { // Update roughly 20 times/sec
@@ -824,7 +815,6 @@ function updateNPCs(deltaTime) {
                      npc.vy = Math.sin(newAngle) * speed;
                  }
 
-
                 // Shooter & Dodger NPC logic
                 // Check if NPC is allowed to shoot (based on generation) and if cooldown is ready
                 const canShoot = (npc.canShoot ?? false) && (now - npc.lastShotTime > npc.shootInterval); // Use the canShoot flag from generation
@@ -889,7 +879,6 @@ function updateBullets(deltaTime) {
         }
     });
 
-
     bullets = bullets.filter(bullet => {
         bullet.x += bullet.vx;
         bullet.y += bullet.vy;
@@ -927,7 +916,6 @@ function updateBullets(deltaTime) {
                  }
              }
          }
-
 
         // Remove bullets that go too far out of the active area
         const currentChunkId = getChunkId(bullet.x, bullet.y);
@@ -1015,29 +1003,39 @@ function draw() {
         const chunkY = coords.y * CHUNK_SIZE;
 
         if (chunk) {
-             // Draw obstacles
+            // --- Special Rendering for Spawn Chunk ---
+            if (chunk.isSpawnChunk) {
+                drawSpawnChunkVisuals(chunkX, chunkY);
+                // Note: We *don't* draw the 'wall' type obstacles below for the spawn chunk,
+                // as drawSpawnChunkVisuals handles the appearance. Collision still works.
+            }
+
+             // --- Draw Regular Obstacles (excluding spawn walls) ---
              if(chunk.obstacles) {
                 chunk.obstacles.forEach(obstacle => {
-                    if (obstacle.type === 'wall') {
-                        ctx.fillStyle = '#666'; // Wall color
-                        ctx.fillRect(obstacle.x - obstacle.width / 2, obstacle.y - obstacle.height / 2, obstacle.width, obstacle.height);
-                    } else if (obstacle.radius) { // Assume circular if radius exists
-                        ctx.fillStyle = '#555'; // Random obstacle color
-                        ctx.beginPath();
-                        const radius = obstacle.radius || 15;
-                        if (radius > 0) {
-                            ctx.arc(obstacle.x, obstacle.y, radius, 0, Math.PI * 2);
-                            ctx.fill();
-                        } else {
-                             console.warn("Skipping drawing obstacle with invalid radius:", obstacle);
-                             ctx.fillStyle = 'magenta';
-                             ctx.fillRect(obstacle.x - 5, obstacle.y - 5, 10, 10); // Error marker
+                    // Only draw non-wall obstacles, or walls outside the spawn chunk
+                    if (obstacle.type !== 'wall' || !chunk.isSpawnChunk) {
+                        if (obstacle.type === 'wall') { // Should only be walls outside spawn now
+                            ctx.fillStyle = '#666'; // Wall color
+                            ctx.fillRect(obstacle.x - obstacle.width / 2, obstacle.y - obstacle.height / 2, obstacle.width, obstacle.height);
+                        } else if (obstacle.radius) { // Assume circular if radius exists
+                            ctx.fillStyle = '#555'; // Random obstacle color
+                            ctx.beginPath();
+                            const radius = obstacle.radius || 15;
+                            if (radius > 0) {
+                                ctx.arc(obstacle.x, obstacle.y, radius, 0, Math.PI * 2);
+                                ctx.fill();
+                            } else {
+                                 console.warn("Skipping drawing obstacle with invalid radius:", obstacle);
+                                 ctx.fillStyle = 'magenta';
+                                 ctx.fillRect(obstacle.x - 5, obstacle.y - 5, 10, 10); // Error marker
+                            }
                         }
                     }
                 });
             }
 
-             // Draw NPCs (only if not spawn chunk, handled by generation)
+             // --- Draw NPCs (if any) ---
             if(chunk.npcs && chunk.npcs.length > 0) {
                 chunk.npcs.forEach(npc => {
                     ctx.fillStyle = npc.type === 'shooter' ? '#f55' : '#f90'; // Red for shooters, orange for dodgers
@@ -1188,6 +1186,54 @@ function draw() {
     }
 
     ctx.restore(); // Restore transform
+}
+
+function drawSpawnChunkVisuals(chunkBaseX, chunkBaseY) {
+    const halfChunk = CHUNK_SIZE / 2;
+    const wallThickness = SPAWN_VISUAL_WALL_THICKNESS; // Use visual thickness
+    const gateWidth = SPAWN_VISUAL_GATE_WIDTH; // Use visual gate width
+    const wallColor = '#4a4a5a'; // A slightly bluish dark grey for walls
+    const gateColor = '#6a6a7a'; // Lighter color for gate area indication
+
+    ctx.fillStyle = '#252530'; // Slightly different background for spawn interior
+    ctx.fillRect(chunkBaseX, chunkBaseY, CHUNK_SIZE, CHUNK_SIZE);
+
+    ctx.save();
+    ctx.translate(chunkBaseX + halfChunk, chunkBaseY + halfChunk); // Center drawing coords in chunk
+
+    // --- Draw Walls ---
+    ctx.fillStyle = wallColor;
+    const outerBoundary = halfChunk; // Edge of the chunk
+    const innerBoundary = halfChunk - wallThickness; // Inner edge of the wall
+
+    // Calculate visual segments
+    const segmentLength = (CHUNK_SIZE - gateWidth) / 2;
+
+    // North Wall (visual)
+    ctx.fillRect(-halfChunk, -outerBoundary, segmentLength, wallThickness); // Left segment
+    ctx.fillRect(halfChunk - segmentLength, -outerBoundary, segmentLength, wallThickness); // Right segment
+    // South Wall (visual)
+    ctx.fillRect(-halfChunk, innerBoundary, segmentLength, wallThickness); // Left segment
+    ctx.fillRect(halfChunk - segmentLength, innerBoundary, segmentLength, wallThickness); // Right segment
+    // West Wall (visual)
+    ctx.fillRect(-outerBoundary, -halfChunk, wallThickness, segmentLength); // Top segment
+    ctx.fillRect(-outerBoundary, halfChunk - segmentLength, wallThickness, segmentLength); // Bottom segment
+    // East Wall (visual)
+    ctx.fillRect(innerBoundary, -halfChunk, wallThickness, segmentLength); // Top segment
+    ctx.fillRect(innerBoundary, halfChunk - segmentLength, wallThickness, segmentLength); // Bottom segment
+
+    // --- Draw Gate Areas (optional visual indication) ---
+    ctx.fillStyle = gateColor;
+    // North Gate Area
+    ctx.fillRect(-gateWidth / 2, -outerBoundary, gateWidth, wallThickness);
+    // South Gate Area
+    ctx.fillRect(-gateWidth / 2, innerBoundary, gateWidth, wallThickness);
+    // West Gate Area
+    ctx.fillRect(-outerBoundary, -gateWidth / 2, wallThickness, gateWidth);
+    // East Gate Area
+    ctx.fillRect(innerBoundary, -gateWidth / 2, wallThickness, gateWidth);
+
+    ctx.restore(); // Restore translation
 }
 
 function drawPlayerHealthBar(ctx, x, y, health, maxHealth) {
