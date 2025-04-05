@@ -748,8 +748,16 @@ function draw() {
                 ctx.fillStyle = '#555';
                 chunk.obstacles.forEach(obstacle => {
                     ctx.beginPath();
-                    ctx.arc(obstacle.x, obstacle.y, obstacle.radius, 0, Math.PI * 2);
-                    ctx.fill();
+                    // Ensure radius is positive before drawing
+                    const radius = obstacle.radius || 15; // Default if missing
+                    if (radius > 0) {
+                        ctx.arc(obstacle.x, obstacle.y, radius, 0, Math.PI * 2);
+                        ctx.fill();
+                    } else {
+                         console.warn("Skipping drawing obstacle with invalid radius:", obstacle);
+                         ctx.fillStyle = 'magenta';
+                         ctx.fillRect(obstacle.x - 5, obstacle.y - 5, 10, 10); // Error marker
+                    }
                 });
             }
 
@@ -758,8 +766,16 @@ function draw() {
                 chunk.npcs.forEach(npc => {
                     ctx.fillStyle = npc.type === 'shooter' ? '#f55' : '#f90'; // Red for shooters, orange for dodgers
                     ctx.beginPath();
-                    ctx.arc(npc.x, npc.y, npc.radius, 0, Math.PI * 2);
-                    ctx.fill();
+                    // Ensure radius is positive before drawing
+                    const radius = npc.radius || 8; // Default if missing/falsy
+                    if (radius > 0) {
+                        ctx.arc(npc.x, npc.y, radius, 0, Math.PI * 2);
+                        ctx.fill();
+                    } else {
+                         console.warn("Skipping drawing NPC with invalid radius:", npc);
+                         ctx.fillStyle = 'magenta';
+                         ctx.fillRect(npc.x - 5, npc.y - 5, 10, 10); // Error marker
+                    }
                 });
             }
 
@@ -784,8 +800,16 @@ function draw() {
     ctx.fillStyle = '#ff0'; // Yellow bullets
     bullets.forEach(bullet => {
         ctx.beginPath();
-        ctx.arc(bullet.x, bullet.y, bullet.radius, 0, Math.PI * 2);
-        ctx.fill();
+        // Ensure radius is positive before drawing
+        const radius = bullet.radius || BULLET_RADIUS; // Default if missing/falsy
+        if (radius > 0) {
+            ctx.arc(bullet.x, bullet.y, radius, 0, Math.PI * 2);
+            ctx.fill();
+        } else {
+            console.warn("Skipping drawing bullet with invalid radius:", bullet);
+             ctx.fillStyle = 'magenta';
+             ctx.fillRect(bullet.x - 2, bullet.y - 2, 4, 4); // Error marker
+        }
     });
 
 
@@ -797,8 +821,17 @@ function draw() {
             // Draw player circle
             ctx.fillStyle = getPlayerColor(clientId); // Use a consistent color based on ID
             ctx.beginPath();
-            ctx.arc(p.x, p.y, PLAYER_RADIUS, 0, Math.PI * 2);
-            ctx.fill();
+            // Ensure radius is positive before drawing
+             const radius = PLAYER_RADIUS;
+             if (radius > 0) {
+                ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
+                ctx.fill();
+            } else {
+                console.warn("Skipping drawing player with invalid radius:", p);
+                ctx.fillStyle = 'magenta';
+                ctx.fillRect(p.x - 5, p.y - 5, 10, 10); // Error marker
+            }
+
 
              // Draw avatar image if available
             if (p.avatarUrl) {
@@ -832,8 +865,17 @@ function draw() {
     } else {
         ctx.fillStyle = getPlayerColor(room.clientId);
         ctx.beginPath();
-        ctx.arc(localPlayer.x, localPlayer.y, PLAYER_RADIUS, 0, Math.PI * 2);
-        ctx.fill();
+        // Ensure radius is positive before drawing
+        const radius = PLAYER_RADIUS;
+        if (radius > 0) {
+            ctx.arc(localPlayer.x, localPlayer.y, radius, 0, Math.PI * 2);
+            ctx.fill();
+        } else {
+            console.warn("Skipping drawing local player with invalid radius:", localPlayer);
+            ctx.fillStyle = 'magenta';
+            ctx.fillRect(localPlayer.x - 5, localPlayer.y - 5, 10, 10); // Error marker
+        }
+
 
         // Draw username
         const myInfo = room.peers[room.clientId];
