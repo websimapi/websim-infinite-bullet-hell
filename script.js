@@ -234,45 +234,60 @@ function generateChunkData(chunkX, chunkY) {
 
     // --- NPC Generation based on Distance ---
     let numNpcs = 0;
-    let npcBaseSpeed = 0.5; // Slower base speed near spawn
-    let baseShootInterval = 10000; // Longer interval near spawn by default
+    // Start with a very low base speed near spawn
+    let npcBaseSpeed = 0.3; // Significantly reduced base speed
+    let baseShootInterval = 15000; // Longer interval near spawn by default (15s+)
     let shooterProbability = 0; // No shooters near spawn
     let canShoot = false; // NPCs generally can't shoot near spawn
 
     // Spawn Chunk (0,0) - Explicitly 0 NPCs
     if (chunkX === 0 && chunkY === 0) {
         numNpcs = 0;
+        console.log(`Chunk ${chunkId}: Spawn chunk, 0 NPCs.`);
     }
     // Immediate adjacent chunks (distanceFactor approx 1 to 1.41)
     else if (distanceFactor < 2) {
-        numNpcs = Math.floor((chunkNoise(0,0) + 1) / 2 * 1 + 1); // Reduced: 1-2 NPCs
-        npcBaseSpeed = 0.5;
-        baseShootInterval = 12000 + Math.random() * 6000; // Even rarer shots (12-18s)
+         // Have a *chance* to spawn 1 NPC, not guaranteed
+        if (chunkNoise(0,0) > 0.5) { // ~50% chance for 1 NPC
+             numNpcs = 1;
+        } else {
+             numNpcs = 0;
+        }
+        npcBaseSpeed = 0.4; // Still very slow
+        baseShootInterval = 18000 + Math.random() * 4000; // Even rarer shots (18-22s)
         shooterProbability = 0; // Still no shooters
         canShoot = false; // Cannot shoot this close
+        console.log(`Chunk ${chunkId}: Adjacent to spawn, ${numNpcs} NPCs (slow).`);
     }
     // Close chunks (distanceFactor 2 to < 5)
     else if (distanceFactor < 5) {
-        numNpcs = Math.floor((chunkNoise(0,0) + 1) / 2 * 2 + 1); // Reduced: 1-3 NPCs
-        npcBaseSpeed = 0.8 + distanceFactor * 0.05;
-        baseShootInterval = 4000 + Math.random() * 2000; // 4-6s interval
-        shooterProbability = 0.1; // Small chance of shooters
-        canShoot = true; // Can start shooting
+        // Max 1-2 NPCs, scaling slowly with noise
+        numNpcs = Math.floor((chunkNoise(0,0) + 1) / 2 * 1.5); // 0, 1, or rarely 2 NPCs
+        npcBaseSpeed = 0.5 + distanceFactor * 0.05; // Slightly faster: 0.6 to 0.75
+        baseShootInterval = 5000 + Math.random() * 3000; // 5-8s interval
+        shooterProbability = 0.05; // Very small chance of shooters
+        canShoot = shooterProbability > 0; // Can only shoot if there's a chance of being a shooter
+        console.log(`Chunk ${chunkId}: Close to spawn, ${numNpcs} NPCs.`);
     }
     // Further out chunks (distanceFactor >= 5)
     else {
-        numNpcs = Math.min(3 + Math.floor(distanceFactor / 1.5), 20); // Adjusted scaling: starts slightly lower, scales slightly slower, max 20
-        npcBaseSpeed = 1.0 + distanceFactor * 0.1;
-        baseShootInterval = 2000 + Math.random() * 2000; // 2-4s interval
-        shooterProbability = 0.3 + Math.min(0.3, distanceFactor * 0.02); // Increase shooter probability with distance, capped
+        // Start with 1-2 base NPCs, scale slower
+        numNpcs = 1 + Math.floor((chunkNoise(0,0) + 1) / 2 * (distanceFactor / 2)); // Scale more gradually, max depends on distance
+        numNpcs = Math.min(numNpcs, 15); // Lower max NPC count overall
+        npcBaseSpeed = 0.6 + distanceFactor * 0.08; // Slower speed scaling: starts at ~1.0, increases slower
+        npcBaseSpeed = Math.min(npcBaseSpeed, MAX_SPEED * 0.8); // Cap NPC speed below player max speed
+        baseShootInterval = 2500 + Math.random() * 1500; // 2.5-4s interval (more frequent further out)
+        shooterProbability = 0.2 + Math.min(0.4, distanceFactor * 0.015); // Increase shooter probability slower, capped lower
         canShoot = true;
+        console.log(`Chunk ${chunkId}: Farther out, ${numNpcs} NPCs (scaling).`);
     }
 
 
     for (let i = 0; i < numNpcs; i++) {
         // Decide NPC type based on probability
         const npcType = Math.random() < shooterProbability ? 'shooter' : 'dodger';
-        const speedMultiplier = npcBaseSpeed + (chunkNoise(i*5, i*5) * 0.2); // Add some noise variation to speed
+        // Adjust speed slightly based on noise, keep it within reasonable bounds
+        const speedMultiplier = Math.max(0.2, npcBaseSpeed + (chunkNoise(i*5, i*5) * 0.1)); // Ensure minimum speed
 
         npcs.push({
             id: `npc_${chunkId}_${i}`,
@@ -290,7 +305,12 @@ function generateChunkData(chunkX, chunkY) {
     }
 
     // --- Obstacle Generation ---
-    const numObstacles = Math.floor((chunkNoise(100, 100) + 1) / 2 * (3 + distanceFactor * 0.5) + 1); // Slightly more obstacles further out, min 1
+     // Keep obstacle generation similar, maybe slightly fewer near spawn
+    let numObstacles = 0;
+     if (distanceFactor > 1) { // No obstacles right next to spawn (0,0) or immediate neighbours
+         numObstacles = Math.floor((chunkNoise(100, 100) + 1) / 2 * (2 + distanceFactor * 0.4) + 1); // Fewer base obstacles, scale slightly slower
+     }
+
      for (let i = 0; i < numObstacles; i++) {
         // Map noise from [-1, 1] to [0, 1] for positioning within the chunk, adding margins
         const normalizedNoiseX = (chunkNoise(200 + i, 200 + i) + 1) / 2;
@@ -302,7 +322,8 @@ function generateChunkData(chunkX, chunkY) {
             id: `obs_${chunkId}_${i}`,
             x: chunkX * CHUNK_SIZE + normalizedNoiseX * CHUNK_SIZE * 0.8 + CHUNK_SIZE * 0.1, // Position within 80% of chunk, offset by 10%
             y: chunkY * CHUNK_SIZE + normalizedNoiseY * CHUNK_SIZE * 0.8 + CHUNK_SIZE * 0.1,
-            radius: normalizedNoiseRadius * 15 + 10 + Math.min(15, distanceFactor * 1.5), // Radius: base 10-25, scales slightly with distance up to +15
+             // Slightly smaller obstacles near spawn, scale slower
+            radius: normalizedNoiseRadius * 10 + 8 + Math.min(12, distanceFactor * 1.0), // Radius: base 8-18, scales slightly slower with distance up to +12
         });
     }
 
@@ -703,7 +724,7 @@ function updateNPCs(deltaTime) {
                 const minY = chunkCoords.y * CHUNK_SIZE;
                 const maxY = minY + CHUNK_SIZE;
 
-                 // More robust boundary collision check
+                // More robust boundary collision check
                 let bounced = false;
                 if (npc.x < minX + npc.radius) { npc.x = minX + npc.radius; npc.vx *= -1; bounced = true; }
                 if (npc.x > maxX - npc.radius) { npc.x = maxX - npc.radius; npc.vx *= -1; bounced = true; }
