@@ -18,6 +18,9 @@ const START_TIME = Date.now();
 const MAX_HEALTH = 100;
 const HEALTH_REGEN_RATE = 2; // Health points per second
 const BULLET_DAMAGE = 15; // Base damage per bullet hit
+const DODGER_BULLET_DAMAGE = 10; // Damage for dodger bullets
+const EXPLOSION_DURATION = 0.3; // seconds
+const EXPLOSION_RADIUS = 30; // Max radius of explosion effect
 
 let localPlayer = {
   x: 0,
@@ -35,7 +38,8 @@ let players = {}; // Store other players' data { clientId: { x, y, username, ava
 let localChunks = {}; // Store chunk data generated locally { 'x_y': { npcs: [...], obstacles: [...] } }
 let remoteChunks = {}; // Store chunk data received from peers { 'x_y': { clientId: chunkData } }
 let activeChunkPortals = {}; // Store conflicting chunks needing resolution { 'x_y': [clientId1, clientId2, ...] }
-let bullets = []; // { x, y, vx, vy, ownerChunkX, ownerChunkY }
+let bullets = []; // { x, y, vx, vy, ownerChunkX, ownerChunkY, type: 'shooter' | 'dodger' }
+let explosions = []; // { x, y, startTime, maxRadius }
 let camera = { x: 0, y: 0 };
 let keys = {};
 
@@ -167,6 +171,11 @@ function handleRoomMessages(event) {
         case 'bulletFired':
             if (data.clientId !== room.clientId) { // Don't add our own bullets twice
                 bullets.push({ ...data.bulletData, remote: true });
+            }
+            break;
+        case 'explosion': // Handle explosion event from others
+             if (data.clientId !== room.clientId) {
+                createExplosion(data.x, data.y);
             }
             break;
         // Handle other custom events
@@ -662,28 +671,31 @@ function updateNPCs(deltaTime) {
                  npc.y = Math.max(minY + npc.radius, Math.min(maxY - npc.radius, npc.y));
 
 
-                // Shooter NPC logic
-                if (npc.type === 'shooter' && now - npc.lastShotTime > npc.shootInterval) {
+                // Shooter & Dodger NPC logic
+                const canShoot = now - npc.lastShotTime > npc.shootInterval;
+                if (canShoot) {
                     // Find nearest player (simple approach: local player only for now)
                     const target = localPlayer; // Could be expanded to target closest player in chunk
                     if (!target.dead) {
                         const dx = target.x - npc.x;
                         const dy = target.y - npc.y;
                         const dist = Math.sqrt(dx * dx + dy * dy);
-                        const bulletSpeed = 4; // Adjust as needed
+                        const bulletSpeed = npc.type === 'shooter' ? 4 : 3; // Dodgers shoot slightly slower
 
                         if (dist > 0 && dist < CHUNK_SIZE * 0.8) { // Only shoot if player is reasonably close
                             const bulletVx = (dx / dist) * bulletSpeed;
                             const bulletVy = (dy / dist) * bulletSpeed;
+                            const bulletType = npc.type === 'shooter' ? 'shooter' : 'dodger'; // Assign bullet type
                             const bulletData = {
                                 x: npc.x,
                                 y: npc.y,
                                 vx: bulletVx,
                                 vy: bulletVy,
-                                ownerChunkX: chunkCoords.x,
-                                ownerChunkY: chunkCoords.y,
+                                ownerChunkX: getChunkCoordinates(chunkId).x,
+                                ownerChunkY: getChunkCoordinates(chunkId).y,
                                 ownerId: `npc_${npc.id}`, // Identify bullet owner
-                                radius: BULLET_RADIUS
+                                radius: BULLET_RADIUS,
+                                type: bulletType // Add type here
                             };
                             bullets.push(bulletData);
 
@@ -692,7 +704,7 @@ function updateNPCs(deltaTime) {
 
                             npc.lastShotTime = now;
                              // Randomize next shot slightly
-                            npc.shootInterval = 2000 + Math.random() * 2000;
+                            npc.shootInterval = (npc.type === 'shooter' ? 2000 : 2500) + Math.random() * 2000; // Dodgers shoot less frequently
                         }
                     }
                 }
@@ -725,14 +737,14 @@ function updateBullets(deltaTime) {
         if (!localPlayer.dead) {
             const dist = Math.sqrt((localPlayer.x - bullet.x) ** 2 + (localPlayer.y - bullet.y) ** 2);
             if (dist < PLAYER_RADIUS + bullet.radius) {
-                // console.log("Player hit!");
-                // localPlayer.dead = true; // Replaced with damage logic
-                takeDamage(BULLET_DAMAGE); // Apply damage instead of instant death
-                 // Simple death: stop moving, maybe show visual indicator later
-                 // localPlayer.vx = 0;
-                 // localPlayer.vy = 0;
-                 // room.updatePresence({ dead: true, x: localPlayer.x, y: localPlayer.y }); // Inform others
-                 // Maybe reset game after a delay or show game over screen
+                const damage = bullet.type === 'dodger' ? DODGER_BULLET_DAMAGE : BULLET_DAMAGE;
+                takeDamage(damage);
+                // Trigger explosion for dodger bullets on player hit
+                if (bullet.type === 'dodger') {
+                    createExplosion(bullet.x, bullet.y);
+                     // Send explosion event to others
+                    room.send({ type: 'explosion', x: bullet.x, y: bullet.y });
+                }
                 return false; // Remove bullet on hit
             }
         }
@@ -744,6 +756,12 @@ function updateBullets(deltaTime) {
              for(const obstacle of chunk.obstacles) {
                  const dist = Math.sqrt((bullet.x - obstacle.x) ** 2 + (bullet.y - obstacle.y) ** 2);
                  if (dist < bullet.radius + obstacle.radius) {
+                     // Trigger explosion for dodger bullets on obstacle hit
+                     if (bullet.type === 'dodger') {
+                         createExplosion(bullet.x, bullet.y);
+                          // Send explosion event to others
+                         room.send({ type: 'explosion', x: bullet.x, y: bullet.y });
+                     }
                      return false; // Remove bullet on obstacle collision
                  }
              }
@@ -800,6 +818,18 @@ function takeDamage(amount) {
       else healthBarFill.style.backgroundColor = '#4caf50';
      healthText.textContent = `Health: ${Math.round(localPlayer.health)}/${localPlayer.maxHealth}`;
 
+}
+
+function createExplosion(x, y) {
+    explosions.push({ x, y, startTime: Date.now(), maxRadius: EXPLOSION_RADIUS });
+}
+
+function updateExplosions(deltaTime) {
+    const now = Date.now();
+    explosions = explosions.filter(explosion => {
+        const age = (now - explosion.startTime) / 1000; // Age in seconds
+        return age < EXPLOSION_DURATION; // Keep explosion if duration hasn't passed
+    });
 }
 
 // --- Rendering ---
@@ -878,11 +908,10 @@ function draw() {
     });
 
      // Draw Bullets
-    ctx.fillStyle = '#ff0'; // Yellow bullets
     bullets.forEach(bullet => {
+        ctx.fillStyle = bullet.type === 'dodger' ? '#ff9800' : '#ff0'; // Orange for dodger, Yellow for shooter
         ctx.beginPath();
-        // Ensure radius is positive before drawing
-        const radius = bullet.radius || BULLET_RADIUS; // Default if missing/falsy
+        const radius = bullet.radius || BULLET_RADIUS;
         if (radius > 0) {
             ctx.arc(bullet.x, bullet.y, radius, 0, Math.PI * 2);
             ctx.fill();
@@ -893,6 +922,28 @@ function draw() {
         }
     });
 
+     // Draw Explosions
+    const now = Date.now();
+    explosions.forEach(explosion => {
+        const age = (now - explosion.startTime) / 1000; // Age in seconds
+        const progress = age / EXPLOSION_DURATION; // 0 to 1
+
+        if (progress < 1) {
+            const currentRadius = explosion.maxRadius * progress;
+            const opacity = 1 - progress; // Fade out
+
+            ctx.fillStyle = `rgba(255, 152, 0, ${opacity * 0.8})`; // Orange explosion, fading out
+            ctx.beginPath();
+            ctx.arc(explosion.x, explosion.y, currentRadius, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Optional: add inner core
+            ctx.fillStyle = `rgba(255, 255, 100, ${opacity * 0.5})`; // Yellowish core
+            ctx.beginPath();
+            ctx.arc(explosion.x, explosion.y, currentRadius * 0.5, 0, Math.PI * 2);
+            ctx.fill();
+        }
+    });
 
     // Draw other players
     ctx.font = '10px sans-serif';
@@ -913,8 +964,7 @@ function draw() {
                 ctx.fillRect(p.x - 5, p.y - 5, 10, 10); // Error marker
             }
 
-
-             // Draw avatar image if available
+            // Draw avatar image if available
             if (p.avatarUrl) {
                 try {
                     const img = new Image();
@@ -926,7 +976,6 @@ function draw() {
 
              // Draw Health Bar above player
              drawPlayerHealthBar(ctx, p.x, p.y - PLAYER_RADIUS - 15, p.health, p.maxHealth);
-
 
             // Draw username above health bar
             ctx.fillStyle = '#fff';
@@ -972,7 +1021,6 @@ function draw() {
         ctx.font = '10px sans-serif';
         ctx.fillText(myInfo?.username || 'You', localPlayer.x, localPlayer.y - PLAYER_RADIUS - 20); // Adjusted Y position
     }
-
 
     ctx.restore(); // Restore transform
 }
@@ -1128,8 +1176,9 @@ function gameLoop(timestamp) {
 
     // Update game state
     updatePlayer(deltaTime);
-    updateNPCs(deltaTime); // Update NPCs in loaded chunks
-    updateBullets(deltaTime); // Update bullets
+    updateNPCs(deltaTime);
+    updateBullets(deltaTime);
+    updateExplosions(deltaTime); // Update explosions
 
     // Re-check for conflicts periodically or when chunk data changes
     // checkForConflicts is called when new data arrives or is generated.
