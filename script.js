@@ -229,27 +229,53 @@ function generateChunkData(chunkX, chunkY) {
     const npcs = [];
     const obstacles = [];
     const distanceFactor = Math.sqrt(chunkX * chunkX + chunkY * chunkY);
-    const numNpcs = Math.min(5 + Math.floor(distanceFactor / 2), 20); // Scale NPCs with distance
     const seed = chunkX * 10000 + chunkY; // Simple seed based on coords
-
     const chunkNoise = createNoise2D(() => seed); // Seeded noise for this chunk
 
+    // --- NPC Generation based on Distance ---
+    let numNpcs = 0;
+    let npcBaseSpeed = 0.5; // Slower base speed near spawn
+    let baseShootInterval = 5000; // Longer interval near spawn
+    let shooterProbability = 0; // No shooters near spawn
+
+    if (distanceFactor < 2) { // Very close to spawn (origin chunk and immediate neighbours)
+        numNpcs = Math.floor((chunkNoise(0,0) + 1) / 2 * 2 + 1); // 1-3 NPCs
+        npcBaseSpeed = 0.5;
+        baseShootInterval = 10000 + Math.random() * 5000; // Shoot very rarely (10-15s) or never
+    } else if (distanceFactor < 5) { // Close to spawn
+        numNpcs = Math.floor((chunkNoise(0,0) + 1) / 2 * 3 + 2); // 2-5 NPCs
+        npcBaseSpeed = 0.8 + distanceFactor * 0.05;
+        baseShootInterval = 4000 + Math.random() * 2000; // 4-6s interval
+        shooterProbability = 0.1; // Small chance of shooters
+    } else { // Further out
+        numNpcs = Math.min(5 + Math.floor(distanceFactor / 2), 20); // Scale NPCs with distance
+        npcBaseSpeed = 1.0 + distanceFactor * 0.1;
+        baseShootInterval = 2000 + Math.random() * 2000; // 2-4s interval (as before)
+        shooterProbability = 0.3 + Math.min(0.3, distanceFactor * 0.02); // Increase shooter probability with distance, capped
+    }
+
+
     for (let i = 0; i < numNpcs; i++) {
-        const npcType = distanceFactor > 5 ? (Math.random() < 0.3 ? 'shooter' : 'dodger') : 'dodger'; // Introduce shooters further out
+        // Decide NPC type based on probability
+        const npcType = Math.random() < shooterProbability ? 'shooter' : 'dodger';
+        const speedMultiplier = npcBaseSpeed + (chunkNoise(i*5, i*5) * 0.2); // Add some noise variation to speed
+
         npcs.push({
             id: `npc_${chunkId}_${i}`,
             x: chunkX * CHUNK_SIZE + Math.random() * CHUNK_SIZE,
             y: chunkY * CHUNK_SIZE + Math.random() * CHUNK_SIZE,
-            vx: (chunkNoise(i * 0.1, 0) * 2 - 1) * (1 + distanceFactor * 0.1), // Faster further out
-            vy: (chunkNoise(0, i * 0.1) * 2 - 1) * (1 + distanceFactor * 0.1),
+            vx: (chunkNoise(i * 0.1, 0) * 2 - 1) * speedMultiplier,
+            vy: (chunkNoise(0, i * 0.1) * 2 - 1) * speedMultiplier,
             type: npcType,
             lastShotTime: 0,
-            shootInterval: 2000 + Math.random() * 2000, // Random interval between 2-4 seconds
+            shootInterval: baseShootInterval * (npcType === 'shooter' ? 0.8 : 1.2), // Shooters fire a bit faster than dodgers relative to base interval
             radius: 8,
+            canShoot: distanceFactor >= 1.5 // NPCs in the very first ring might not shoot initially
         });
     }
 
-    const numObstacles = Math.floor((chunkNoise(100, 100) + 1) / 2 * 5 + 2); // Use noise mapped to [0, 1], generates 2-7 obstacles
+    // --- Obstacle Generation ---
+    const numObstacles = Math.floor((chunkNoise(100, 100) + 1) / 2 * (3 + distanceFactor * 0.5) + 1); // Slightly more obstacles further out, min 1
      for (let i = 0; i < numObstacles; i++) {
         // Map noise from [-1, 1] to [0, 1] for positioning within the chunk, adding margins
         const normalizedNoiseX = (chunkNoise(200 + i, 200 + i) + 1) / 2;
@@ -261,7 +287,7 @@ function generateChunkData(chunkX, chunkY) {
             id: `obs_${chunkId}_${i}`,
             x: chunkX * CHUNK_SIZE + normalizedNoiseX * CHUNK_SIZE * 0.8 + CHUNK_SIZE * 0.1, // Position within 80% of chunk, offset by 10%
             y: chunkY * CHUNK_SIZE + normalizedNoiseY * CHUNK_SIZE * 0.8 + CHUNK_SIZE * 0.1,
-            radius: normalizedNoiseRadius * 20 + 15, // Radius between 15 (0*20+15) and 35 (1*20+15)
+            radius: normalizedNoiseRadius * 15 + 10 + Math.min(15, distanceFactor * 1.5), // Radius: base 10-25, scales slightly with distance up to +15
         });
     }
 
@@ -663,16 +689,27 @@ function updateNPCs(deltaTime) {
                 const minY = chunkCoords.y * CHUNK_SIZE;
                 const maxY = minY + CHUNK_SIZE;
 
-                if (npc.x < minX + npc.radius || npc.x > maxX - npc.radius) npc.vx *= -1;
-                if (npc.y < minY + npc.radius || npc.y > maxY - npc.radius) npc.vy *= -1;
+                 // More robust boundary collision check
+                let bounced = false;
+                if (npc.x < minX + npc.radius) { npc.x = minX + npc.radius; npc.vx *= -1; bounced = true; }
+                if (npc.x > maxX - npc.radius) { npc.x = maxX - npc.radius; npc.vx *= -1; bounced = true; }
+                if (npc.y < minY + npc.radius) { npc.y = minY + npc.radius; npc.vy *= -1; bounced = true; }
+                if (npc.y > maxY - npc.radius) { npc.y = maxY - npc.radius; npc.vy *= -1; bounced = true; }
 
-                 // Clamp position just in case
-                 npc.x = Math.max(minX + npc.radius, Math.min(maxX - npc.radius, npc.x));
-                 npc.y = Math.max(minY + npc.radius, Math.min(maxY - npc.radius, npc.y));
+                 // Apply slight random turn on bounce to prevent getting stuck in loops
+                 if(bounced) {
+                     const angleChange = (Math.random() - 0.5) * 0.5; // +/- 0.25 radians
+                     const newAngle = Math.atan2(npc.vy, npc.vx) + angleChange;
+                     const speed = Math.sqrt(npc.vx*npc.vx + npc.vy*npc.vy);
+                     npc.vx = Math.cos(newAngle) * speed;
+                     npc.vy = Math.sin(newAngle) * speed;
+                 }
 
 
                 // Shooter & Dodger NPC logic
-                const canShoot = now - npc.lastShotTime > npc.shootInterval;
+                // Check if NPC is allowed to shoot (based on distance when generated) and if cooldown is ready
+                const canShoot = (npc.canShoot ?? true) && (now - npc.lastShotTime > npc.shootInterval);
+
                 if (canShoot) {
                     // Find nearest player (simple approach: local player only for now)
                     const target = localPlayer; // Could be expanded to target closest player in chunk
@@ -680,9 +717,13 @@ function updateNPCs(deltaTime) {
                         const dx = target.x - npc.x;
                         const dy = target.y - npc.y;
                         const dist = Math.sqrt(dx * dx + dy * dy);
-                        const bulletSpeed = npc.type === 'shooter' ? 4 : 3; // Dodgers shoot slightly slower
+                         // Determine bullet speed based on distance factor where NPC spawned
+                         const spawnChunkCoords = getChunkCoordinates(chunkId);
+                         const spawnDistanceFactor = Math.sqrt(spawnChunkCoords.x**2 + spawnChunkCoords.y**2);
+                         let bulletSpeed = 2 + Math.min(3, spawnDistanceFactor * 0.2); // Base speed 2, scales up to 5 further out
+                         if (npc.type === 'dodger') bulletSpeed *= 0.8; // Dodgers shoot slightly slower
 
-                        if (dist > 0 && dist < CHUNK_SIZE * 0.8) { // Only shoot if player is reasonably close
+                        if (dist > 0 && dist < CHUNK_SIZE * 0.7) { // Reduced shooting range slightly
                             const bulletVx = (dx / dist) * bulletSpeed;
                             const bulletVy = (dy / dist) * bulletSpeed;
                             const bulletType = npc.type === 'shooter' ? 'shooter' : 'dodger'; // Assign bullet type
@@ -703,8 +744,8 @@ function updateNPCs(deltaTime) {
                              room.send({ type: 'bulletFired', bulletData });
 
                             npc.lastShotTime = now;
-                             // Randomize next shot slightly
-                            npc.shootInterval = (npc.type === 'shooter' ? 2000 : 2500) + Math.random() * 2000; // Dodgers shoot less frequently
+                             // Randomize next shot slightly based on original interval
+                             // npc.shootInterval doesn't need to be reassigned here unless we want dynamic intervals
                         }
                     }
                 }
