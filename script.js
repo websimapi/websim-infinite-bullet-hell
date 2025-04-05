@@ -5,6 +5,8 @@ const ctx = canvas.getContext('2d');
 const scoreElement = document.getElementById('score');
 const leaderboardList = document.getElementById('leaderboard-list');
 const portalsContainer = document.getElementById('portals');
+const healthBarFill = document.getElementById('health-bar-fill');
+const healthText = document.getElementById('health-text');
 
 const room = new WebsimSocket();
 
@@ -13,6 +15,9 @@ const PLAYER_RADIUS = 10;
 const BULLET_RADIUS = 5;
 const MAX_SPEED = 3;
 const START_TIME = Date.now();
+const MAX_HEALTH = 100;
+const HEALTH_REGEN_RATE = 2; // Health points per second
+const BULLET_DAMAGE = 15; // Base damage per bullet hit
 
 let localPlayer = {
   x: 0,
@@ -20,11 +25,13 @@ let localPlayer = {
   vx: 0,
   vy: 0,
   score: 0,
+  health: MAX_HEALTH,
+  maxHealth: MAX_HEALTH,
   lastUpdateTime: Date.now(),
   dead: false,
 };
 
-let players = {}; // Store other players' data { clientId: { x, y, username, avatarUrl, score, dead } }
+let players = {}; // Store other players' data { clientId: { x, y, username, avatarUrl, score, health, maxHealth, dead } }
 let localChunks = {}; // Store chunk data generated locally { 'x_y': { npcs: [...], obstacles: [...] } }
 let remoteChunks = {}; // Store chunk data received from peers { 'x_y': { clientId: chunkData } }
 let activeChunkPortals = {}; // Store conflicting chunks needing resolution { 'x_y': [clientId1, clientId2, ...] }
@@ -51,6 +58,8 @@ async function initializeGame() {
     x: localPlayer.x,
     y: localPlayer.y,
     score: localPlayer.score,
+    health: localPlayer.health,
+    maxHealth: localPlayer.maxHealth,
     dead: localPlayer.dead,
   });
 
@@ -88,7 +97,17 @@ function handlePresenceUpdate(presence) {
   players = {}; // Reset and repopulate
   for (const clientId in presence) {
     if (clientId !== room.clientId) {
-      players[clientId] = { ...presence[clientId], ...room.peers[clientId] }; // Combine presence and peer info
+       // Ensure default values if properties are missing from presence update
+       const pData = presence[clientId];
+      players[clientId] = {
+        ...room.peers[clientId], // Add username/avatar first
+        x: pData.x ?? 0,
+        y: pData.y ?? 0,
+        score: pData.score ?? 0,
+        health: pData.health ?? MAX_HEALTH,
+        maxHealth: pData.maxHealth ?? MAX_HEALTH,
+        dead: pData.dead ?? false,
+       };
     }
   }
   updateLeaderboard();
@@ -120,6 +139,10 @@ function handlePresenceUpdateRequest(updateRequest, fromClientId) {
             resolveChunkConflict(chunkId, proposedWinnerId);
         }
     }
+    // Future: Handle damage requests here if PvP is added
+    // else if (updateRequest.type === 'inflictDamage') {
+    //     takeDamage(updateRequest.amount);
+    // }
 }
 
 
@@ -501,6 +524,14 @@ function cleanUpDisconnectedPeerChunks(disconnectedClientId) {
 function updatePlayer(deltaTime) {
     if (localPlayer.dead) return;
 
+    // Health Regeneration
+    if (localPlayer.health < localPlayer.maxHealth) {
+        localPlayer.health += HEALTH_REGEN_RATE * deltaTime;
+        if (localPlayer.health > localPlayer.maxHealth) {
+            localPlayer.health = localPlayer.maxHealth;
+        }
+    }
+
     let moveX = 0;
     let moveY = 0;
     if (keys['w'] || keys['arrowup']) moveY -= 1;
@@ -558,12 +589,28 @@ function updatePlayer(deltaTime) {
     localPlayer.score = Math.floor((now - START_TIME) / 100); // 1 point per 100ms survived
     scoreElement.textContent = `Score: ${localPlayer.score}`;
 
+    // Update UI Health Bar
+    const healthPercentage = Math.max(0, (localPlayer.health / localPlayer.maxHealth) * 100);
+    healthBarFill.style.width = `${healthPercentage}%`;
+     // Change color based on health
+    if (healthPercentage < 30) {
+        healthBarFill.style.backgroundColor = '#f44336'; // Red
+    } else if (healthPercentage < 60) {
+        healthBarFill.style.backgroundColor = '#ff9800'; // Orange
+    } else {
+        healthBarFill.style.backgroundColor = '#4caf50'; // Green
+    }
+    healthText.textContent = `Health: ${Math.round(localPlayer.health)}/${localPlayer.maxHealth}`;
+
+
     // Send presence update periodically
     if (now - localPlayer.lastUpdateTime > 50) { // Update roughly 20 times/sec
         room.updatePresence({
             x: localPlayer.x,
             y: localPlayer.y,
             score: localPlayer.score,
+            health: localPlayer.health,
+            maxHealth: localPlayer.maxHealth, // Send max health too, in case it changes later
             dead: localPlayer.dead,
         });
         localPlayer.lastUpdateTime = now;
@@ -585,7 +632,6 @@ function getNearbyChunkIds(x, y, radius = 1) {
     }
     return nearbyIds;
 }
-
 
 function updateNPCs(deltaTime) {
     const visibleChunks = getVisibleChunkIds();
@@ -655,7 +701,6 @@ function updateNPCs(deltaTime) {
     });
 }
 
-
 function updateBullets(deltaTime) {
     const visibleChunks = getVisibleChunkIds();
     const activeChunkBounds = new Set();
@@ -680,12 +725,13 @@ function updateBullets(deltaTime) {
         if (!localPlayer.dead) {
             const dist = Math.sqrt((localPlayer.x - bullet.x) ** 2 + (localPlayer.y - bullet.y) ** 2);
             if (dist < PLAYER_RADIUS + bullet.radius) {
-                console.log("Player hit!");
-                localPlayer.dead = true;
+                // console.log("Player hit!");
+                // localPlayer.dead = true; // Replaced with damage logic
+                takeDamage(BULLET_DAMAGE); // Apply damage instead of instant death
                  // Simple death: stop moving, maybe show visual indicator later
-                 localPlayer.vx = 0;
-                 localPlayer.vy = 0;
-                 room.updatePresence({ dead: true, x: localPlayer.x, y: localPlayer.y }); // Inform others
+                 // localPlayer.vx = 0;
+                 // localPlayer.vy = 0;
+                 // room.updatePresence({ dead: true, x: localPlayer.x, y: localPlayer.y }); // Inform others
                  // Maybe reset game after a delay or show game over screen
                 return false; // Remove bullet on hit
             }
@@ -720,6 +766,41 @@ function updateBullets(deltaTime) {
     });
 }
 
+function takeDamage(amount) {
+    if (localPlayer.dead) return; // Can't take damage if already dead
+
+    localPlayer.health -= amount;
+    console.log(`Player took ${amount} damage, health: ${localPlayer.health}`);
+
+    if (localPlayer.health <= 0) {
+        localPlayer.health = 0;
+        localPlayer.dead = true;
+        localPlayer.vx = 0; // Stop movement
+        localPlayer.vy = 0;
+        console.log("Player died!");
+        // Update presence immediately on death
+        room.updatePresence({
+            dead: true,
+            health: localPlayer.health,
+            x: localPlayer.x, // Send final position
+            y: localPlayer.y
+        });
+         // TODO: Implement respawn logic or game over screen
+    } else {
+         // Update presence with new health if not dead yet
+         // This happens in the periodic update in updatePlayer, but could be sent immediately:
+         // room.updatePresence({ health: localPlayer.health });
+    }
+
+     // Update UI immediately
+     const healthPercentage = Math.max(0, (localPlayer.health / localPlayer.maxHealth) * 100);
+     healthBarFill.style.width = `${healthPercentage}%`;
+      if (healthPercentage < 30) healthBarFill.style.backgroundColor = '#f44336';
+      else if (healthPercentage < 60) healthBarFill.style.backgroundColor = '#ff9800';
+      else healthBarFill.style.backgroundColor = '#4caf50';
+     healthText.textContent = `Health: ${Math.round(localPlayer.health)}/${localPlayer.maxHealth}`;
+
+}
 
 // --- Rendering ---
 
@@ -843,10 +924,14 @@ function draw() {
                 } catch (e) { console.error("Failed to load avatar", e); }
             }
 
-            // Draw username above player
+             // Draw Health Bar above player
+             drawPlayerHealthBar(ctx, p.x, p.y - PLAYER_RADIUS - 15, p.health, p.maxHealth);
+
+
+            // Draw username above health bar
             ctx.fillStyle = '#fff';
             ctx.textAlign = 'center';
-            ctx.fillText(p.username || clientId.substring(0, 6), p.x, p.y - PLAYER_RADIUS - 5);
+            ctx.fillText(p.username || clientId.substring(0, 6), p.x, p.y - PLAYER_RADIUS - 20); // Adjusted Y position
         } else {
              // Optionally draw dead players differently (e.g., greyed out 'X')
              ctx.fillStyle = '#888';
@@ -863,6 +948,7 @@ function draw() {
          ctx.textAlign = 'center';
          ctx.fillText('X', localPlayer.x, localPlayer.y + 5);
     } else {
+        // Draw player circle
         ctx.fillStyle = getPlayerColor(room.clientId);
         ctx.beginPath();
         // Ensure radius is positive before drawing
@@ -876,17 +962,45 @@ function draw() {
             ctx.fillRect(localPlayer.x - 5, localPlayer.y - 5, 10, 10); // Error marker
         }
 
+        // Draw Health Bar above player
+        drawPlayerHealthBar(ctx, localPlayer.x, localPlayer.y - PLAYER_RADIUS - 15, localPlayer.health, localPlayer.maxHealth);
 
-        // Draw username
+        // Draw username above health bar
         const myInfo = room.peers[room.clientId];
         ctx.fillStyle = '#fff';
         ctx.textAlign = 'center';
         ctx.font = '10px sans-serif';
-        ctx.fillText(myInfo?.username || 'You', localPlayer.x, localPlayer.y - PLAYER_RADIUS - 5);
+        ctx.fillText(myInfo?.username || 'You', localPlayer.x, localPlayer.y - PLAYER_RADIUS - 20); // Adjusted Y position
     }
 
 
     ctx.restore(); // Restore transform
+}
+
+function drawPlayerHealthBar(ctx, x, y, health, maxHealth) {
+    const barWidth = PLAYER_RADIUS * 3; // Width relative to player size
+    const barHeight = 5;
+    const healthPercentage = Math.max(0, health) / maxHealth; // Ensure health isn't negative for display
+
+    // Background of the health bar (e.g., dark red or grey)
+    ctx.fillStyle = '#555';
+    ctx.fillRect(x - barWidth / 2, y - barHeight / 2, barWidth, barHeight);
+
+    // Foreground (current health)
+    let healthColor = '#4caf50'; // Green
+    if (healthPercentage < 0.3) {
+        healthColor = '#f44336'; // Red
+    } else if (healthPercentage < 0.6) {
+        healthColor = '#ff9800'; // Orange
+    }
+    ctx.fillStyle = healthColor;
+    ctx.fillRect(x - barWidth / 2, y - barHeight / 2, barWidth * healthPercentage, barHeight);
+
+     // Optional: Add a border
+    ctx.strokeStyle = '#222';
+    ctx.lineWidth = 0.5;
+    ctx.strokeRect(x - barWidth / 2, y - barHeight / 2, barWidth, barHeight);
+    ctx.lineWidth = 1; // Reset default
 }
 
 function drawChunkGrid() {
@@ -912,8 +1026,6 @@ function drawChunkGrid() {
     }
 }
 
-
-// Consistent color based on clientId hash
 function getPlayerColor(clientId) {
     let hash = 0;
     for (let i = 0; i < clientId.length; i++) {
@@ -922,7 +1034,6 @@ function getPlayerColor(clientId) {
     const color = (hash & 0x00FFFFFF).toString(16).toUpperCase();
     return '#' + '00000'.substring(0, 6 - color.length) + color;
 }
-
 
 // --- UI Updates ---
 
@@ -1001,7 +1112,6 @@ function updatePortalUI() {
         portalsContainer.style.display = 'none';
     }
 }
-
 
 // --- Game Loop ---
 

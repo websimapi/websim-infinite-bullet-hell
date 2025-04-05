@@ -39,6 +39,32 @@ body {
   border-radius: 5px;
 }
 
+#health-container {
+  background-color: rgba(0, 0, 0, 0.5);
+  padding: 5px 10px;
+  border-radius: 5px;
+  width: 150px; 
+  position: relative; 
+}
+
+#health-bar-fill {
+  background-color: #4caf50; 
+  height: 15px;
+  width: 100%; 
+  border-radius: 3px;
+  transition: width 0.2s ease-in-out, background-color 0.2s ease-in-out;
+}
+#health-text {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 0.8em;
+    color: white;
+    text-shadow: 1px 1px 1px black; 
+    white-space: nowrap;
+}
+
 #leaderboard {
   background-color: rgba(0, 0, 0, 0.5);
   padding: 10px;
@@ -95,4 +121,3 @@ body {
 .portal-button:hover {
   background-color: #66c;
 }
-
