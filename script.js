@@ -235,23 +235,37 @@ function generateChunkData(chunkX, chunkY) {
     // --- NPC Generation based on Distance ---
     let numNpcs = 0;
     let npcBaseSpeed = 0.5; // Slower base speed near spawn
-    let baseShootInterval = 5000; // Longer interval near spawn
+    let baseShootInterval = 10000; // Longer interval near spawn by default
     let shooterProbability = 0; // No shooters near spawn
+    let canShoot = false; // NPCs generally can't shoot near spawn
 
-    if (distanceFactor < 2) { // Very close to spawn (origin chunk and immediate neighbours)
-        numNpcs = Math.floor((chunkNoise(0,0) + 1) / 2 * 2 + 1); // 1-3 NPCs
+    // Spawn Chunk (0,0) - Explicitly 0 NPCs
+    if (chunkX === 0 && chunkY === 0) {
+        numNpcs = 0;
+    }
+    // Immediate adjacent chunks (distanceFactor approx 1 to 1.41)
+    else if (distanceFactor < 2) {
+        numNpcs = Math.floor((chunkNoise(0,0) + 1) / 2 * 1 + 1); // Reduced: 1-2 NPCs
         npcBaseSpeed = 0.5;
-        baseShootInterval = 10000 + Math.random() * 5000; // Shoot very rarely (10-15s) or never
-    } else if (distanceFactor < 5) { // Close to spawn
-        numNpcs = Math.floor((chunkNoise(0,0) + 1) / 2 * 3 + 2); // 2-5 NPCs
+        baseShootInterval = 12000 + Math.random() * 6000; // Even rarer shots (12-18s)
+        shooterProbability = 0; // Still no shooters
+        canShoot = false; // Cannot shoot this close
+    }
+    // Close chunks (distanceFactor 2 to < 5)
+    else if (distanceFactor < 5) {
+        numNpcs = Math.floor((chunkNoise(0,0) + 1) / 2 * 2 + 1); // Reduced: 1-3 NPCs
         npcBaseSpeed = 0.8 + distanceFactor * 0.05;
         baseShootInterval = 4000 + Math.random() * 2000; // 4-6s interval
         shooterProbability = 0.1; // Small chance of shooters
-    } else { // Further out
-        numNpcs = Math.min(5 + Math.floor(distanceFactor / 2), 20); // Scale NPCs with distance
+        canShoot = true; // Can start shooting
+    }
+    // Further out chunks (distanceFactor >= 5)
+    else {
+        numNpcs = Math.min(3 + Math.floor(distanceFactor / 1.5), 20); // Adjusted scaling: starts slightly lower, scales slightly slower, max 20
         npcBaseSpeed = 1.0 + distanceFactor * 0.1;
-        baseShootInterval = 2000 + Math.random() * 2000; // 2-4s interval (as before)
+        baseShootInterval = 2000 + Math.random() * 2000; // 2-4s interval
         shooterProbability = 0.3 + Math.min(0.3, distanceFactor * 0.02); // Increase shooter probability with distance, capped
+        canShoot = true;
     }
 
 
@@ -268,9 +282,10 @@ function generateChunkData(chunkX, chunkY) {
             vy: (chunkNoise(0, i * 0.1) * 2 - 1) * speedMultiplier,
             type: npcType,
             lastShotTime: 0,
-            shootInterval: baseShootInterval * (npcType === 'shooter' ? 0.8 : 1.2), // Shooters fire a bit faster than dodgers relative to base interval
+             // Use the calculated base interval, adjust slightly per type
+            shootInterval: baseShootInterval * (1 + (Math.random() * 0.4 - 0.2)) * (npcType === 'shooter' ? 0.9 : 1.1), // Add +-20% randomness + type adjustment
             radius: 8,
-            canShoot: distanceFactor >= 1.5 // NPCs in the very first ring might not shoot initially
+            canShoot: canShoot // Assign the determined shoot ability
         });
     }
 
@@ -294,7 +309,6 @@ function generateChunkData(chunkX, chunkY) {
 
     return { npcs, obstacles };
 }
-
 
 function ensureChunkExists(chunkId) {
   if (!localChunks[chunkId]) {
@@ -707,8 +721,8 @@ function updateNPCs(deltaTime) {
 
 
                 // Shooter & Dodger NPC logic
-                // Check if NPC is allowed to shoot (based on distance when generated) and if cooldown is ready
-                const canShoot = (npc.canShoot ?? true) && (now - npc.lastShotTime > npc.shootInterval);
+                // Check if NPC is allowed to shoot (based on generation) and if cooldown is ready
+                const canShoot = (npc.canShoot ?? false) && (now - npc.lastShotTime > npc.shootInterval); // Use the canShoot flag from generation
 
                 if (canShoot) {
                     // Find nearest player (simple approach: local player only for now)
@@ -745,7 +759,8 @@ function updateNPCs(deltaTime) {
 
                             npc.lastShotTime = now;
                              // Randomize next shot slightly based on original interval
-                             // npc.shootInterval doesn't need to be reassigned here unless we want dynamic intervals
+                             npc.shootInterval *= (1 + (Math.random() * 0.2 - 0.1)); // Vary interval by +/- 10% each shot
+                             if (npc.shootInterval < 1000) npc.shootInterval = 1000; // Add a minimum interval cap
                         }
                     }
                 }
